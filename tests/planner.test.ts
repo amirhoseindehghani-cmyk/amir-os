@@ -232,3 +232,51 @@ test('the tool schema advertises exactly the actions the validator accepts', () 
     { id: 'c1', action: 'update-target', label: 'Ease running', targetId: 'w2', target: 20 },
   ])));
 });
+
+test('migration adds empty ongoingTasks array when field is missing', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  delete (doc as any).ongoingTasks;
+  const migrated = migratePlannerData(doc, '2026-09-07');
+  assert.ok(Array.isArray(migrated.ongoingTasks));
+  assert.equal(migrated.ongoingTasks.length, 0);
+});
+
+test('default document includes an empty ongoingTasks array', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  assert.ok(Array.isArray(doc.ongoingTasks));
+  assert.equal(doc.ongoingTasks.length, 0);
+});
+
+test('adding and completing an ongoing task', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const task = { id: 'ot-1', text: 'Buy groceries', done: false, deadline: null, category: 'personal' as const, priority: 2 as const, createdAt: '2026-09-07T10:00:00.000Z' };
+  const withTask = { ...doc, ongoingTasks: [...doc.ongoingTasks, task] };
+  assert.equal(withTask.ongoingTasks.length, 1);
+  assert.equal(withTask.ongoingTasks[0].done, false);
+  const completed = { ...withTask, ongoingTasks: withTask.ongoingTasks.map(t => t.id === 'ot-1' ? { ...t, done: true } : t) };
+  assert.equal(completed.ongoingTasks[0].done, true);
+});
+
+test('removing an ongoing task', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const task = { id: 'ot-1', text: 'Buy groceries', done: false, deadline: null, category: 'personal' as const, priority: 2 as const, createdAt: '2026-09-07T10:00:00.000Z' };
+  const withTask = { ...doc, ongoingTasks: [task] };
+  const removed = { ...withTask, ongoingTasks: withTask.ongoingTasks.filter(t => t.id !== 'ot-1') };
+  assert.equal(removed.ongoingTasks.length, 0);
+});
+
+test('scheduling a session from an ongoing task creates correct sourceTaskId link', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const task = { id: 'ot-1', text: 'Fix SabzApply website', done: false, deadline: '2026-09-10', category: 'sabzapply' as const, priority: 1 as const, createdAt: '2026-09-07T10:00:00.000Z' };
+  const withTask = { ...doc, ongoingTasks: [task] };
+  const session = { id: 'session-from-ot', date: '2026-09-07', start: '14:00', duration: 60, title: task.text, category: task.category, kind: 'flexible' as const, status: 'planned' as const, sourceTaskId: task.id };
+  const withSession = { ...withTask, sessions: [...withTask.sessions, session] };
+  const linked = withSession.sessions.find(s => s.sourceTaskId === 'ot-1');
+  assert.ok(linked);
+  assert.equal(linked.title, 'Fix SabzApply website');
+
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'add', label: 'Work on SabzApply', session: { ...session, id: 'session-new' } },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, withTask), []);
+});

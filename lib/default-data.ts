@@ -36,18 +36,18 @@ export function createDefaultDocument(localDate:string):PlannerDocument{
     {id:'t-internship',title:'Prepare and submit internship applications',goalId:'g-internship',category:'internship',priority:1,status:'active',deadline:addLocalDays(today,5),estimatedMinutes:240},
     {id:'t-sabz',title:'Finish SabzApply onboarding flow',goalId:'g-sabz',category:'sabzapply',priority:2,status:'active',deadline:addLocalDays(today,3),estimatedMinutes:300},
     {id:'t-dutch',title:'Complete Dutch B1 chapter 4',goalId:'g-dutch',category:'dutch',priority:2,status:'active',estimatedMinutes:180},
-  ],sessions,top3:['Submit two internship applications','Finish SabzApply onboarding decisions','Complete easy run'],reviews:[],memories:[{id:'mem-1',text:'Prefer Dutch before 18:00',reason:'Recent sessions scheduled later were completed less consistently.',status:'pending'}],proposals:[],history:[],lastOpenedLocalDate:localDate};
+  ],ongoingTasks:[],sessions,top3:['Submit two internship applications','Finish SabzApply onboarding decisions','Complete easy run'],reviews:[],memories:[{id:'mem-1',text:'Prefer Dutch before 18:00',reason:'Recent sessions scheduled later were completed less consistently.',status:'pending'}],proposals:[],history:[],lastOpenedLocalDate:localDate};
 }
 
 export function migratePlannerData(input:unknown,localDate:string):PlannerDocument{
   const fallback=createDefaultDocument(localDate); if(!input||typeof input!=='object')return fallback;
   const raw=input as Record<string,unknown>;
-  if(raw.version===5&&raw.profile&&Array.isArray(raw.weeks))return ensureCurrentWeek(repairMondayMigration(raw as PlannerDocument,localDate),localDate);
+  if(raw.version===5&&raw.profile&&Array.isArray(raw.weeks)){const doc=raw as PlannerDocument;if(!Array.isArray(doc.ongoingTasks))doc.ongoingTasks=[];return ensureCurrentWeek(repairMondayMigration(doc,localDate),localDate);}
   if(raw.version===4&&raw.profile&&Array.isArray(raw.goals)){
     const old=raw as any, oldTargets:WeeklyTarget[]=(old.weeklyTargets??templates).map((t:any)=>({id:String(t.id),goalId:String(t.goalId),label:String(t.label),category:t.category,priority:t.priority,target:Number(t.target),unit:t.unit,baselineDone:Number(t.done??0)}));
     const completedDates=(old.sessions??[]).filter((s:Session)=>s.status==='done').map((s:Session)=>s.date).sort();
     const anchor=completedDates.at(-1)??old.lastMorningCheckIn?.date??old.lastOpenedLocalDate??localDate;
-    const inferredWeekId=weekIdForDate(anchor),historicalWeekId=localDate===startOfIsoWeek(localDate)&&inferredWeekId===startOfIsoWeek(localDate)?addLocalDays(inferredWeekId,-7):inferredWeekId,migrated:PlannerDocument={...old,version:5,weeklyTargetTemplates:oldTargets.map(t=>({...t,baselineDone:undefined})),weeks:[{weekId:historicalWeekId,startDate:historicalWeekId,endDate:endOfIsoWeek(historicalWeekId),targets:oldTargets,createdAt:new Date().toISOString(),source:'migration'}],lastOpenedLocalDate:localDate};
+    const inferredWeekId=weekIdForDate(anchor),historicalWeekId=localDate===startOfIsoWeek(localDate)&&inferredWeekId===startOfIsoWeek(localDate)?addLocalDays(inferredWeekId,-7):inferredWeekId,migrated:PlannerDocument={...old,version:5,ongoingTasks:Array.isArray(old.ongoingTasks)?old.ongoingTasks:[],weeklyTargetTemplates:oldTargets.map(t=>({...t,baselineDone:undefined})),weeks:[{weekId:historicalWeekId,startDate:historicalWeekId,endDate:endOfIsoWeek(historicalWeekId),targets:oldTargets,createdAt:new Date().toISOString(),source:'migration'}],lastOpenedLocalDate:localDate};
     delete (migrated as any).weeklyTargets; return ensureCurrentWeek(migrated,localDate);
   }
   const oldDays=(raw.dayData??{}) as Record<string,{blocks?:Array<Record<string,unknown>>;review?:Record<string,unknown>;top3?:string[]}>,sessions:Session[]=[],reviews:PlannerDocument['reviews']=[];

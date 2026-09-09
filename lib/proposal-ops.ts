@@ -40,7 +40,7 @@ export function validateProposalAgainstDocument(proposal:PlanProposal,doc:Planne
         if(doc.sessions.some(existing=>existing.status!=='skipped'&&existing.date===s.date&&existing.start===s.start&&existing.title===s.title))errors.push(`${change.label}: duplicate session already exists.`);
         if(!validDate(s.date)||weekIdForDate(s.date)!==proposal.weekId)errors.push(`${change.label}: date must be a real date inside week ${proposal.weekId} (received ${show(s.date)}).`);
         if(!TIME_RE.test(s.start)||!inRange(s.duration,15,720))errors.push(`${change.label}: start must be HH:MM and duration 15–720 minutes (received ${show(s.start)} and ${show(s.duration)}).`);
-        if(s.sourceTaskId&&!doc.tasks.some(t=>t.id===s.sourceTaskId))errors.push(`${change.label}: linked task "${s.sourceTaskId}" does not exist.`);
+        if(s.sourceTaskId&&!doc.tasks.some(t=>t.id===s.sourceTaskId)&&!doc.ongoingTasks.some(t=>t.id===s.sourceTaskId))errors.push(`${change.label}: linked task "${s.sourceTaskId}" does not exist.`);
         if(s.goalId&&!doc.goals.some(g=>g.id===s.goalId))errors.push(`${change.label}: linked goal "${s.goalId}" does not exist.`);
         if(change.action==='add-commitment'&&s.kind!=='fixed')errors.push(`${change.label}: commitment must be fixed.`);
       }

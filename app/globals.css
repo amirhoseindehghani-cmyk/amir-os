@@ -157,3 +157,20 @@ body {
 .login-card button{margin-top:16px;min-height:46px;border-radius:11px;background:#263c34;color:#fff;font-weight:650;font-size:15px}
 .login-error{background:#fff2f0;border:1px solid #e7b7b0;color:#85463d;border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:8px}
 .sync-signin{font-size:12px;font-weight:700;padding:7px 10px;border-radius:8px;background:#fff;border:1px solid #e7b7b0;color:#85463d}
+
+/* Ongoing tasks */
+.ongoing-section{margin-top:36px;border-top:1px solid #e4e2dc;padding-top:28px}
+.ongoing-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.ongoing-head .section-label{gap:7px}.ongoing-head>button{display:flex;align-items:center;gap:4px;color:#526e63;font-size:13px;font-weight:600}
+.ongoing-group{margin-bottom:18px}.ongoing-group-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;font-weight:700;color:#6d6c66;text-transform:uppercase;letter-spacing:.08em}.ongoing-group-header .cat-dot{width:8px;height:8px}
+.ongoing-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e4e2dc;border-radius:11px;background:#fff;margin-bottom:6px;min-height:48px}.ongoing-row.done-row{opacity:.5}.ongoing-row.done-row .ongoing-text{text-decoration:line-through}
+.ongoing-check{width:20px;height:20px;border:2px solid #c4c3bc;border-radius:5px;display:grid;place-items:center;flex:0 0 auto;cursor:pointer;background:transparent}.ongoing-check.checked{background:#547868;border-color:#547868;color:#fff}.ongoing-check svg{width:14px}
+.ongoing-badge{font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;flex:0 0 auto;text-transform:uppercase;letter-spacing:.06em}.p1{background:#fce8e6;color:#c05b46}.p2{background:#fef3e0;color:#b68232}.p3{background:#f0efeb;color:#8b8a83}
+.ongoing-text{flex:1;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ongoing-text-input{flex:1;min-width:0;border:1px solid #d8d6cf;border-radius:7px;padding:4px 8px;font-size:14px;outline:none}.ongoing-text-input:focus{border-color:#5f8275}
+.deadline-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;flex:0 0 auto;white-space:nowrap}.deadline-overdue{background:#fce8e6;color:#c05b46}.deadline-today{background:#fef3e0;color:#b68232}.deadline-soon{background:#fff9e6;color:#9a8629}.deadline-later{background:#f0efeb;color:#8b8a83}
+.ongoing-actions{display:flex;gap:2px;flex:0 0 auto}.ongoing-actions button{padding:5px;border-radius:6px;color:#9a9992;display:grid;place-items:center}.ongoing-actions button:hover{background:#f0efeb;color:#555}.ongoing-actions button svg{width:15px}
+.completed-toggle{margin-top:6px;font-size:12px;font-weight:600;color:#8b8a83;cursor:pointer;display:flex;align-items:center;gap:5px}.completed-toggle svg{width:14px}
+.add-task-form{border:1px solid #dce5e0;background:#f6faf8;border-radius:13px;padding:14px;margin-top:10px;display:grid;gap:10px}.add-task-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.add-task-row input{flex:1;min-width:180px}.add-task-row select{border:1px solid #dedcd5;border-radius:7px;padding:6px 8px;font-size:13px;background:#fff}.add-task-row button{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:650}
+.schedule-inline{border:1px solid #dce5e0;background:#f6faf8;border-radius:10px;padding:10px;margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.schedule-inline select,.schedule-inline input{border:1px solid #dedcd5;border-radius:7px;padding:5px 7px;font-size:12px;background:#fff}.schedule-inline button{padding:5px 10px;border-radius:7px;font-size:12px;font-weight:650}
+/* Tasks full view */
+.tasks-stats{display:flex;gap:16px;align-items:center;margin-bottom:24px;font-size:13px;color:#7a7973}.tasks-stats b{color:#20211f;font-size:15px}
+.tasks-filters{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}.tasks-filters button{padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid #e4e2dc;background:#fff;color:#6d6c66}.tasks-filters button.active{background:#263c34;color:#fff;border-color:#263c34}
