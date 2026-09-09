@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'Amir OS — Adaptive planner',
   description: 'A goal-aware personal planning system that continuously answers what to do next.',
+  icons: { icon: '/favicon.svg' },
 };
 
 export default function RootLayout({
