@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { createDefaultDocument, migratePlannerData } from '../lib/default-data';
 import { addLocalDays, localDateInTimeZone, startOfIsoWeek } from '../lib/date-utils';
 import { deterministicPlan } from '../lib/planner-engine';
-import { applyProposalAtomically } from '../lib/proposal-ops';
+import { applyProposalAtomically, PROPOSAL_ACTIONS, proposalJsonSchema, validateProposalAgainstDocument, validateProposalShape } from '../lib/proposal-ops';
 import { getWeek, targetMetrics } from '../lib/week-metrics';
-import type { PlannerDocument, ReplanRequest } from '../lib/planner-types';
+import type { PlanProposal, PlannerDocument, ReplanRequest } from '../lib/planner-types';
 
 function request(document: PlannerDocument, selectedDate: string, message: string): ReplanRequest {
   return {
@@ -113,4 +113,122 @@ test('new information becomes a fixed commitment proposal, not an immediate muta
   assert.equal(commitment?.session?.start, '19:00');
   assert.equal(commitment?.session?.duration, 180);
   assert.deepEqual(doc, snapshot);
+});
+
+function proposalWith(selectedDate: string, changes: PlanProposal['changes']): PlanProposal {
+  return {
+    id: 'proposal-test',
+    title: 'Test proposal',
+    summary: 'Test summary',
+    reasoning: [],
+    tradeoffs: [],
+    changes,
+    createdAt: `${selectedDate}T10:00:00.000Z`,
+    selectedDate,
+    weekId: startOfIsoWeek(selectedDate),
+  };
+}
+
+test('the reported update-goal failure now explains what to use instead', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  // Exactly what the model produced: an amount change dressed up as update-goal.
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'update-goal', label: 'Adjust run contribution to 6 km', goalId: 'g-marathon' },
+  ]);
+  const errors = validateProposalAgainstDocument(proposal, doc);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /priority/);
+  assert.match(errors[0], /update-target/);
+  assert.match(errors[0], /shorten/);
+  assert.ok(!errors[0].includes('goal update is invalid'), 'the opaque message is gone');
+});
+
+test('an unknown goalId is named in the error rather than lumped together', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'update-goal', label: 'Reprioritise', goalId: 'g-nonexistent', priority: 1 },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, doc), [
+    'Reprioritise: no goal matches goalId "g-nonexistent".',
+  ]);
+});
+
+test('update-goal still applies a genuine priority change', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'update-goal', label: 'Marathon first', goalId: 'g-marathon', priority: 1 },
+  ]);
+  const applied = applyProposalAtomically(doc, proposal);
+  assert.equal(applied.ok, true);
+  if (applied.ok) assert.equal(applied.document.goals.find((goal) => goal.id === 'g-marathon')?.priority, 1);
+});
+
+test('shorten can retune a run distance and weekly km follow it', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const snapshot = structuredClone(doc);
+  const week = getWeek(doc, '2026-09-07');
+  assert.ok(week);
+  const running = week.targets.find((target) => target.unit === 'km');
+  assert.ok(running);
+  const before = targetMetrics(doc, week, running).planned;
+
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'shorten', sessionId: 'run-today', label: 'Adjust run contribution to 6 km', from: '7 km', to: '6 km', patch: { distanceKm: 6 } },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, doc), []);
+  const applied = applyProposalAtomically(doc, proposal);
+  assert.equal(applied.ok, true);
+  if (!applied.ok) return;
+
+  const run = applied.document.sessions.find((session) => session.id === 'run-today');
+  assert.equal(run?.distanceKm, 6);
+  assert.equal(run?.contribution, 6, 'contribution tracks distance so weekly km stay correct');
+  const after = targetMetrics(applied.document, getWeek(applied.document, '2026-09-07')!, running).planned;
+  assert.equal(after, before - 1);
+  assert.deepEqual(doc, snapshot, 'the source document is untouched');
+});
+
+test('shorten with no usable patch field is rejected with a specific reason', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'shorten', sessionId: 'run-today', label: 'Trim the run' },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, doc), [
+    'Trim the run: a shorten needs patch.duration, patch.contribution or patch.distanceKm.',
+  ]);
+});
+
+test('update-target changes a weekly target without touching other weeks', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const snapshot = structuredClone(doc);
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'update-target', label: 'Ease weekly running to 20 km', targetId: 'w2', target: 20 },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, doc), []);
+  const applied = applyProposalAtomically(doc, proposal);
+  assert.equal(applied.ok, true);
+  if (!applied.ok) return;
+
+  const week = getWeek(applied.document, '2026-09-07');
+  assert.equal(week?.targets.find((target) => target.id === 'w2')?.target, 20);
+  assert.equal(applied.document.weeklyTargetTemplates.find((target) => target.id === 'w2')?.target, 25, 'templates are not rewritten');
+  assert.deepEqual(doc, snapshot, 'the source document is untouched');
+});
+
+test('update-target is rejected when the target id does not exist', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'update-target', label: 'Ease running', targetId: 'w99', target: 20 },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, doc), [
+    'Ease running: no weekly target matches targetId "w99" in week 2026-09-07.',
+  ]);
+});
+
+test('the tool schema advertises exactly the actions the validator accepts', () => {
+  const schema = proposalJsonSchema();
+  assert.deepEqual([...schema.properties.changes.items.properties.action.enum], [...PROPOSAL_ACTIONS]);
+  assert.ok(validateProposalShape(proposalWith('2026-09-07', [
+    { id: 'c1', action: 'update-target', label: 'Ease running', targetId: 'w2', target: 20 },
+  ])));
 });

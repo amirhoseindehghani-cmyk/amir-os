@@ -10,6 +10,8 @@ export const dynamic = 'force-dynamic';
 const USER_ID = 'amir';
 const TIMEZONE = 'Europe/Amsterdam';
 const SCHEMA_VERSION = 5;
+// Mobile Safari will happily serve a stale planner document from its HTTP cache.
+const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' };
 
 function requestedLocalDate(request: Request) {
   const value = new URL(request.url).searchParams.get('localDate');
@@ -26,18 +28,27 @@ export async function GET(request: Request) {
       .limit(1);
 
     if (rows.length && rows[0].document) {
-      return Response.json({
-        document: migratePlannerData(JSON.parse(rows[0].document), localDate),
-        source: 'cloud',
-      });
+      return Response.json(
+        { document: migratePlannerData(JSON.parse(rows[0].document), localDate), source: 'cloud' },
+        { headers: NO_STORE },
+      );
     }
 
-    return Response.json({ document: createDefaultDocument(localDate), source: 'seed' });
+    return Response.json(
+      { document: createDefaultDocument(localDate), source: 'seed' },
+      { headers: NO_STORE },
+    );
   } catch (error) {
     console.error('[planner-state] load failed', {
       kind: error instanceof Error ? error.name : 'unknown',
     });
-    return Response.json({ document: createDefaultDocument(localDate), source: 'seed' });
+    // Never hand back a seeded document on a read failure. The client would treat
+    // it as real cloud state and the next autosave would overwrite the stored
+    // document with defaults. Fail loudly so the client keeps its own copy.
+    return Response.json(
+      { error: 'Storage unavailable', source: 'unavailable' },
+      { status: 503, headers: NO_STORE },
+    );
   }
 }
 
@@ -46,7 +57,7 @@ export async function PUT(request: Request) {
   try {
     input = await request.json();
   } catch {
-    return Response.json({ error: 'Invalid planner document' }, { status: 400 });
+    return Response.json({ error: 'Invalid planner document' }, { status: 400, headers: NO_STORE });
   }
 
   const candidate =
@@ -97,11 +108,11 @@ export async function PUT(request: Request) {
         set: { document: docString, createdAt: now },
       });
 
-    return Response.json({ ok: true, updatedAt: now, source: 'cloud' });
+    return Response.json({ ok: true, updatedAt: now, source: 'cloud' }, { headers: NO_STORE });
   } catch (error) {
     console.error('[planner-state] save failed', {
       kind: error instanceof Error ? error.name : 'unknown',
     });
-    return Response.json({ error: 'Storage unavailable' }, { status: 503 });
+    return Response.json({ error: 'Storage unavailable' }, { status: 503, headers: NO_STORE });
   }
 }

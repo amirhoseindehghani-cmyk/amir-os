@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Activity, ArrowRight, Brain, CalendarDays, Check, ChevronLeft, ChevronRight, CircleAlert, Download, Flag, Gauge, MoreHorizontal, Plus, RefreshCw, Settings2, Sparkles, Target, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -34,8 +34,14 @@ function relativeDayLabel(date: string, today: string) { if (date === today) ret
 export function PlannerApp() {
   const localToday = useMemo(() => localDateInTimeZone(TIMEZONE), []);
   const currentWeekId = startOfIsoWeek(localToday);
-  const [doc, setDoc] = useState<PlannerDocument>(() => createDefaultDocument(localToday));
+  const initialDoc = useMemo(() => createDefaultDocument(localToday), [localToday]);
+  const [doc, setDoc] = useState<PlannerDocument>(initialDoc);
   const [loaded, setLoaded] = useState(false), [sync, setSync] = useState<'saved' | 'saving' | 'offline'>('saving');
+  // cloudReady gates every write: a device that could not read the cloud must never
+  // push its (possibly default) document over the stored one.
+  const [cloudReady, setCloudReady] = useState(false), [syncError, setSyncError] = useState(''), [signedOut, setSignedOut] = useState(false), [offlineEdits, setOfflineEdits] = useState(false);
+  const baselineDoc = useRef<PlannerDocument | null>(null), offlineEditsRef = useRef(false);
+  const markOfflineEdits = (value: boolean) => { offlineEditsRef.current = value; setOfflineEdits(value); };
   const [view, setView] = useState<'day' | 'week' | 'goals' | 'month' | 'settings'>('day');
   const [selectedDate, setSelectedDate] = useState(localToday), [weekCursor, setWeekCursor] = useState(currentWeekId);
   const [morning, setMorning] = useState(false), [proposal, setProposal] = useState<PlanProposal | null>(null);
@@ -46,9 +52,59 @@ export function PlannerApp() {
   const [newTitle, setNewTitle] = useState(''), [newTime, setNewTime] = useState('14:00'), [newFixed, setNewFixed] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { (async () => { try { const response = await fetch(`/api/state?localDate=${localToday}`, { cache: 'no-store' }); if (!response.ok) throw new Error(); const payload = await response.json() as { document: unknown }; setDoc(migratePlannerData(payload.document, localToday)); setSync('saved'); } catch { const raw = localStorage.getItem(CACHE) || localStorage.getItem('amir-planner-v4') || localStorage.getItem('planner-data'); if (raw) setDoc(migratePlannerData(JSON.parse(raw), localToday)); setSync('offline'); } finally { setLoaded(true); } })(); }, [localToday]);
-  useEffect(() => { if (!loaded) return; localStorage.setItem(CACHE, JSON.stringify(doc)); const timer = setTimeout(async () => { setSync('saving'); try { const response = await fetch('/api/state', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(doc) }); setSync(response.ok ? 'saved' : 'offline'); } catch { setSync('offline'); } }, 650); return () => clearTimeout(timer); }, [doc, loaded]);
+  const loadFromCloud = useCallback(async () => {
+    setSync('saving'); setSyncError('');
+    try {
+      const response = await fetch(`/api/state?localDate=${localToday}`, { cache: 'no-store', credentials: 'same-origin' });
+      if (response.status === 401) { setSignedOut(true); setCloudReady(false); setSync('offline'); return false; }
+      if (!response.ok) throw new Error(response.status === 503 ? 'Cloud storage is unavailable right now, so this device is not syncing.' : `The planner could not be loaded from the cloud (HTTP ${response.status}).`);
+      const payload = await response.json() as { document: unknown };
+      setSignedOut(false); setCloudReady(true);
+      // Edits made while offline are the newest intent, so keep them and let autosave push them up.
+      if (!offlineEditsRef.current) { const next = migratePlannerData(payload.document, localToday); baselineDoc.current = next; setDoc(next); setSync('saved'); }
+      return true;
+    } catch (error) {
+      setSync('offline');
+      setSyncError(error instanceof Error && error.message ? error.message : 'The planner could not reach cloud storage.');
+      return false;
+    }
+  }, [localToday]);
 
+  useEffect(() => { (async () => {
+    const ok = await loadFromCloud();
+    if (!ok) {
+      const raw = localStorage.getItem(CACHE) || localStorage.getItem('amir-planner-v4') || localStorage.getItem('planner-data');
+      let restored: PlannerDocument | null = null;
+      if (raw) { try { restored = migratePlannerData(JSON.parse(raw), localToday); } catch { /* a corrupt cache must not block startup */ } }
+      if (restored) setDoc(restored);
+      // Record what we actually started from, so a later edit is recognisable as an
+      // offline edit and a successful retry does not silently discard it.
+      baselineDoc.current = restored ?? initialDoc;
+    }
+    setLoaded(true);
+  })(); }, [localToday, loadFromCloud, initialDoc]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    localStorage.setItem(CACHE, JSON.stringify(doc));
+    const edited = baselineDoc.current !== null && doc !== baselineDoc.current;
+    const timer = setTimeout(async () => {
+      if (!cloudReady) { if (edited) markOfflineEdits(true); return; }
+      setSync('saving');
+      try {
+        const response = await fetch('/api/state', { method: 'PUT', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(doc) });
+        if (response.status === 401) { setSignedOut(true); setCloudReady(false); markOfflineEdits(true); setSync('offline'); return; }
+        if (!response.ok) throw new Error(response.status === 503 ? 'Cloud storage is unavailable, so this change is only on this device.' : `This change could not be saved to the cloud (HTTP ${response.status}).`);
+        baselineDoc.current = doc; markOfflineEdits(false); setSyncError(''); setSync('saved');
+      } catch (error) {
+        markOfflineEdits(true); setSync('offline');
+        setSyncError(error instanceof Error && error.message ? error.message : 'This change is saved on this device only.');
+      }
+    }, 650);
+    return () => clearTimeout(timer);
+  }, [doc, loaded, cloudReady]);
+
+  const syncState = sync === 'saving' ? 'saving' : cloudReady ? sync : 'offline';
   const openDate = (date: string) => { setDoc(current => ensureWeekForDate(current, date)); setSelectedDate(date); setWeekCursor(startOfIsoWeek(date)); setView('day'); };
   const openWeek = (weekId: string) => { const targetWeek = startOfIsoWeek(weekId); setDoc(current => ensureWeekForDate(current, targetWeek)); setWeekCursor(targetWeek); if (startOfIsoWeek(selectedDate) !== targetWeek) setSelectedDate(targetWeek); setView('week'); };
   const selectedSessions = useMemo(() => doc.sessions.filter(session => session.date === selectedDate && session.status !== 'skipped').sort((a, b) => mins(a.start) - mins(b.start)), [doc.sessions, selectedDate]);
@@ -62,8 +118,9 @@ export function PlannerApp() {
     const planningDocument = ensureWeekForDate(doc, selectedDate);
     setDoc(planningDocument); setAiStatus(args.trigger === 'modify' ? 'updating' : 'planning'); setAiError(''); setRetryRequest(args);
     try {
-      const response = await fetch('/api/plan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ trigger: args.trigger, message: args.message, modification: args.modification, originalProposal: args.originalProposal, checkIn: args.trigger === 'morning' ? { wakeTime: wake, energy, unusual } : undefined, document: planningDocument, now: new Date().toISOString(), currentLocalDate: localToday, selectedDate, currentWeekId, timezone: TIMEZONE }) });
+      const response = await fetch('/api/plan', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ trigger: args.trigger, message: args.message, modification: args.modification, originalProposal: args.originalProposal, checkIn: args.trigger === 'morning' ? { wakeTime: wake, energy, unusual } : undefined, document: planningDocument, now: new Date().toISOString(), currentLocalDate: localToday, selectedDate, currentWeekId, timezone: TIMEZONE }) });
       let payload: PlannerApiResponse; try { payload = await response.json() as PlannerApiResponse; } catch { throw new Error('The planning service returned an unreadable response. Your existing plan has not been changed.'); }
+      if (!payload.ok && payload.error.code === 'UNAUTHENTICATED') { setSignedOut(true); setCloudReady(false); }
       if (!response.ok || !payload.ok) throw new Error(payload.ok ? 'AI planning failed. Your existing plan has not been changed.' : payload.error.message);
       setProposal(payload.proposal); setProposalProvider(payload.meta.provider === 'anthropic' ? 'Claude' : 'Local development planner'); setModifyMode(false); setModifyText(''); setMessage(''); if (args.trigger === 'morning') setMorning(false);
     } catch (error) { const detail = error instanceof Error ? error.message : ''; setAiError(!detail || detail === 'Failed to fetch' ? 'AI planning failed. Your existing plan has not been changed.' : detail); } finally { setAiStatus('idle'); }
@@ -80,8 +137,9 @@ export function PlannerApp() {
   if (!loaded) return <div className="min-h-screen grid place-items-center text-stone-500">Preparing your current week…</div>;
 
   return <div className="min-h-screen bg-background text-foreground">
-    <header className="topbar"><div className="brand"><div className="brandmark">A</div><span>Amir</span><span className="brand-muted">OS</span></div><nav className="desktop-nav" aria-label="Primary">{([['day', 'Day'], ['week', 'Week'], ['goals', 'Goals'], ['month', 'Month'], ['settings', 'Profile']] as const).map(([id, label]) => <button key={id} onClick={() => setView(id)} className={view === id ? 'active' : ''}>{label}</button>)}</nav><div className="sync"><span className={`sync-dot ${sync}`} />{sync === 'saved' ? 'Cloud saved' : sync === 'saving' ? 'Saving…' : 'Local cache'}<button className="icon-btn" aria-label="More"><MoreHorizontal size={19} /></button></div></header>
+    <header className="topbar"><div className="brand"><div className="brandmark">A</div><span>Amir</span><span className="brand-muted">OS</span></div><nav className="desktop-nav" aria-label="Primary">{([['day', 'Day'], ['week', 'Week'], ['goals', 'Goals'], ['month', 'Month'], ['settings', 'Profile']] as const).map(([id, label]) => <button key={id} onClick={() => setView(id)} className={view === id ? 'active' : ''}>{label}</button>)}</nav><div className="sync"><span className={`sync-dot ${syncState}`} />{syncState === 'saved' ? 'Cloud saved' : syncState === 'saving' ? 'Saving…' : offlineEdits ? 'Not saved to cloud' : 'Local cache'}<button className="icon-btn" aria-label="More"><MoreHorizontal size={19} /></button></div></header>
     <main className="shell"><div className="mobile-nav"><button onClick={() => setView('day')}>Day</button><button onClick={() => setView('week')}><Gauge />Week</button><button onClick={() => setView('goals')}><Target />Goals</button><button onClick={() => setView('settings')}><Settings2 />Profile</button></div>
+      {(signedOut || syncError) && <div className="ai-error" role="alert"><CircleAlert /><div><b>{signedOut ? 'Signed out — changes are not reaching the cloud' : 'Not saving to the cloud'}</b><span>{signedOut ? 'This device’s session expired. Your plan is safe here; sign in again to resume cloud sync.' : `${syncError}${offlineEdits ? ' Your latest changes are held on this device and will be pushed once syncing resumes.' : ''}`}</span></div>{signedOut ? <a className="sync-signin" href={`/login?next=${encodeURIComponent('/')}`}>Sign in</a> : <button onClick={() => loadFromCloud()}>Retry</button>}<button aria-label="Dismiss sync message" onClick={() => { setSyncError(''); setSignedOut(false); }}><X /></button></div>}
       {aiError && <div className="ai-error" role="alert"><CircleAlert /><div><b>AI planning failed</b><span>{aiError}</span></div>{retryRequest && <button onClick={() => requestPlan(retryRequest)}>Retry</button>}<button aria-label="Dismiss error" onClick={() => setAiError('')}><X /></button></div>}
       {view === 'day' && <DayView doc={doc} localToday={localToday} selectedDate={selectedDate} sessions={selectedSessions} active={active} next={next} focusMinutes={focusMinutes} fixedMinutes={fixedMinutes} onDate={openDate} onMorning={() => setMorning(true)} onReplan={() => requestPlan({ trigger: 'manual' })} onToggle={toggleSession} onAdd={() => setAddOpen(true)} onReasoning={() => setReasoning(!reasoning)} reasoning={reasoning} onOpenWeek={() => openWeek(startOfIsoWeek(selectedDate))} />}
       {view === 'week' && <WeekView doc={doc} setDoc={setDoc} weekId={weekCursor} currentWeekId={currentWeekId} onWeek={openWeek} onDate={openDate} onReplan={() => requestPlan({ trigger: 'manual' })} />}
@@ -110,7 +168,7 @@ function DayView({ doc, localToday, selectedDate, sessions, active, next, focusM
 
 function SessionRow({ session, last, onToggle }: { session: Session; last: boolean; onToggle: () => void }) { return <div id={`session-${session.id}`} className={`session ${session.status === 'done' ? 'done' : ''}`}><div className="time"><b>{session.start}</b><span>{endTime(session.start, session.duration)}</span></div><div className="rail"><button onClick={onToggle} aria-label={`Mark ${session.title} ${session.status === 'done' ? 'planned' : 'done'}`}>{session.status === 'done' ? <Check /> : <span style={{ borderColor: cat[session.category]?.dot }} />}</button>{!last && <i />}</div><div className="session-body"><div><h3>{session.title}</h3><p><span className="tag" style={{ background: cat[session.category]?.pale, color: cat[session.category]?.dot }}>{cat[session.category]?.label}</span><span>{fmtMinutes(session.duration)}</span>{session.kind === 'fixed' && <span className="fixed"><Flag /> Fixed</span>}{session.sourceTaskId && <span>Linked task</span>}</p></div><button aria-label="Session menu"><MoreHorizontal /></button></div></div>; }
 function MiniTarget({ doc, week, target }: { doc: PlannerDocument; week: WeekRecord; target: WeeklyTarget }) { const metrics = targetMetrics(doc, week, target), state = statusFor(metrics); return <div className="mini-target"><div><span className="cat-dot" style={{ background: cat[target.category]?.dot }} /><b>{target.label}</b><em className={state[1]}>{state[0]}</em></div><p>{metrics.done} done · {metrics.planned} planned · {metrics.remaining} remaining · {metrics.target} target</p><Progress value={Math.min(100, metrics.done / Math.max(1, metrics.target) * 100)} /></div>; }
-function Diff({ change }: { change: ProposalChange }) { const names = { add: 'Add', remove: 'Remove', move: 'Move', shorten: 'Shorten', 'update-goal': 'Priority', 'add-commitment': 'Fixed commitment' }; return <article className={`proposal-change ${change.action}`}><div className="change-type">{names[change.action]}</div><div><h3>{change.label}</h3><p>{change.from && <><span>{change.from}</span><ArrowRight /></>}<span>{change.to || (change.session ? `${change.session.date} · ${change.session.start}–${endTime(change.session.start, change.session.duration)}` : '')}</span></p></div></article>; }
+function Diff({ change }: { change: ProposalChange }) { const names: Record<ProposalChange['action'], string> = { add: 'Add', remove: 'Remove', move: 'Move', shorten: 'Resize', 'update-goal': 'Priority', 'update-target': 'Weekly target', 'add-commitment': 'Fixed commitment' }; return <article className={`proposal-change ${change.action}`}><div className="change-type">{names[change.action]}</div><div><h3>{change.label}</h3><p>{change.from && <><span>{change.from}</span><ArrowRight /></>}<span>{change.to || (change.session ? `${change.session.date} · ${change.session.start}–${endTime(change.session.start, change.session.duration)}` : '')}</span></p></div></article>; }
 
 function WeekView({ doc, setDoc, weekId, currentWeekId, onWeek, onDate, onReplan }: { doc: PlannerDocument; setDoc: Dispatch<SetStateAction<PlannerDocument>>; weekId: string; currentWeekId: string; onWeek: (weekId: string) => void; onDate: (date: string) => void; onReplan: () => void }) {
   const week = getWeek(doc, weekId) ?? { weekId, startDate: weekId, endDate: endOfIsoWeek(weekId), targets: doc.weeklyTargetTemplates, createdAt: '', source: 'rollover' as const };
