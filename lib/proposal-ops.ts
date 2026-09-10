@@ -1,4 +1,5 @@
 import { DATE_RE, TIME_RE, weekIdForDate } from './date-utils';
+import { targetMetrics } from './week-metrics';
 import type { PlanProposal, PlannerDocument, Priority } from './planner-types';
 
 export const PROPOSAL_ACTIONS=['add','remove','move','shorten','update-goal','update-target','add-commitment','set-week-plan','rebalance-week','flag-at-risk'] as const;
@@ -60,13 +61,17 @@ export function validateProposalAgainstDocument(proposal:PlanProposal,doc:Planne
       else if(!target)errors.push(`${change.label}: no weekly target matches targetId "${change.targetId}" in week ${proposal.weekId}.`);
       if(!inRange(change.target,0,1000))errors.push(`${change.label}: the new weekly target must be a number between 0 and 1000 (received ${show(change.target)}).`);
     }
+    if(change.action==='flag-at-risk'){
+      if(!change.targetId)errors.push(`${change.label}: flag-at-risk needs targetId.`);
+      else if(!planningWeek?.targets.find(t=>t.id===change.targetId))errors.push(`${change.label}: no weekly target matches targetId "${change.targetId}" in week ${proposal.weekId}.`);
+    }
   }
   return [...new Set(errors)];
 }
 
 export function applyProposalAtomically(doc:PlannerDocument,proposal:PlanProposal):{ok:true;document:PlannerDocument}|{ok:false;errors:string[]}{
   const errors=validateProposalAgainstDocument(proposal,doc);if(errors.length)return{ok:false,errors};
-  let sessions=doc.sessions.map(s=>({...s})),goals=doc.goals.map(g=>({...g})),weeks=doc.weeks.map(w=>({...w,targets:w.targets.map(t=>({...t}))}));
+  let sessions=doc.sessions.map(s=>({...s})),goals=doc.goals.map(g=>({...g})),weeks=doc.weeks.map(w=>({...w,targets:w.targets.map(t=>({...t}))}));const flaggedTargets:string[]=[];
   for(const c of proposal.changes){
     if((c.action==='add'||c.action==='add-commitment')&&c.session)sessions.push({...c.session});
     else if(c.action==='remove')sessions=sessions.map(s=>s.id===c.sessionId?{...s,status:'skipped'}:s);
@@ -81,7 +86,9 @@ export function applyProposalAtomically(doc:PlannerDocument,proposal:PlanProposa
     });
     else if(c.action==='update-goal')goals=goals.map(g=>g.id===c.goalId?{...g,priority:c.priority as Priority}:g);
     else if(c.action==='update-target')weeks=weeks.map(w=>w.weekId!==proposal.weekId?w:{...w,targets:w.targets.map(t=>t.id===c.targetId?{...t,target:c.target as number}:t)});
+    else if(c.action==='flag-at-risk')flaggedTargets.push(c.targetId!);
   }
+  if(flaggedTargets.length){const weekIdx=weeks.findIndex(w=>w.weekId===proposal.weekId);if(weekIdx>=0)weeks[weekIdx]={...weeks[weekIdx],targets:weeks[weekIdx].targets.map(t=>flaggedTargets.includes(t.id)?{...t,completedValue:targetMetrics(doc,weeks[weekIdx],t).done}:t)};}
   if(new Set(sessions.map(s=>s.id)).size!==sessions.length)return{ok:false,errors:['The proposal would create duplicate sessions.']};
   return{ok:true,document:{...doc,sessions,goals,weeks,proposals:[proposal,...doc.proposals].slice(0,30),history:[{id:`applied-${crypto.randomUUID()}`,at:new Date().toISOString(),type:'proposal_applied',note:proposal.summary,weekId:proposal.weekId},...doc.history]}};
 }
@@ -90,7 +97,7 @@ function validDate(value:string){if(!DATE_RE.test(value))return false;const d=ne
 
 export function proposalJsonSchema(){return{type:'object',additionalProperties:false,required:['id','title','summary','reasoning','tradeoffs','changes','createdAt','selectedDate','weekId'],properties:{id:{type:'string'},title:{type:'string'},summary:{type:'string'},reasoning:{type:'array',items:{type:'string'}},tradeoffs:{type:'array',items:{type:'string'}},createdAt:{type:'string'},selectedDate:{type:'string'},weekId:{type:'string'},changes:{type:'array',items:{type:'object',additionalProperties:false,required:['id','action','label'],properties:{
   id:{type:'string'},
-  action:{enum:[...PROPOSAL_ACTIONS],description:'add = new flexible session (needs session). add-commitment = new fixed session (needs session with kind "fixed"). remove = drop a session (needs sessionId). move = reschedule a session (needs sessionId, patch.date, patch.start). shorten = change how big a session is (needs sessionId and at least one of patch.duration, patch.contribution, patch.distanceKm) — use this to change a run distance such as 7 km to 6 km. update-target = change a weekly target amount (needs targetId from planningWeek.targets and target). update-goal = change a goal’s priority ONLY (needs goalId and priority 1, 2 or 3); never use it for hours, kilometres, contributions or target amounts.'},
+  action:{enum:[...PROPOSAL_ACTIONS],description:'add = new flexible session (needs session). add-commitment = new fixed session (needs session with kind "fixed"). remove = drop a session (needs sessionId). move = reschedule a session (needs sessionId, patch.date, patch.start). shorten = resize a session (needs sessionId and at least one of patch.duration, patch.contribution, patch.distanceKm). update-target = change a weekly target amount (needs targetId from planningWeek.targets and target). update-goal = change a goal priority ONLY (needs goalId and priority 1/2/3). set-week-plan = batch-set sessions for remaining days (label only, use add/move changes for actual sessions). rebalance-week = redistribute remaining work after a change (label only). flag-at-risk = mark a weekly target unlikely to be met (needs targetId and label).'},
   sessionId:{type:'string',description:'Existing session id. Required for remove, move and shorten.'},
   label:{type:'string'},
   from:{type:'string'},
@@ -98,8 +105,8 @@ export function proposalJsonSchema(){return{type:'object',additionalProperties:f
   goalId:{type:'string',description:'Existing goal id. Only used by update-goal.'},
   priority:{type:'integer',enum:[1,2,3],description:'New goal priority. Required by update-goal and must be 1, 2 or 3.'},
   targetId:{type:'string',description:'Existing weekly target id taken from planningWeek.targets. Required by update-target.'},
-  target:{type:'number',description:'New weekly target amount, in that target’s own unit. Required by update-target.'},
+  target:{type:'number',description:"New weekly target amount, in that target's own unit. Required by update-target."},
   userReported:{type:'boolean',description:'Set to true when the user explicitly reported a fixed commitment changed. Allows moving fixed sessions to reflect reality. Never set when proactively rescheduling.'},
-  patch:{type:'object',additionalProperties:false,description:'Field updates for move and shorten.',properties:{date:{type:'string'},start:{type:'string'},duration:{type:'number',description:'New length in minutes, 15–720.'},contribution:{type:'number',description:'New amount this session contributes to its weekly target, in that target’s unit.'},distanceKm:{type:'number',description:'New running distance in kilometres.'}}},
+  patch:{type:'object',additionalProperties:false,description:'Field updates for move and shorten.',properties:{date:{type:'string'},start:{type:'string'},duration:{type:'number',description:'New length in minutes, 15–720.'},contribution:{type:'number',description:"New amount this session contributes to its weekly target, in that target's unit."},distanceKm:{type:'number',description:'New running distance in kilometres.'}}},
   session:{type:'object',additionalProperties:false,required:['id','date','start','duration','title','category','kind','status'],properties:{id:{type:'string'},date:{type:'string'},start:{type:'string'},duration:{type:'number'},title:{type:'string'},category:{enum:['internship','dutch','sabzapply','fitness','learning','personal','routine','cooking','free','work']},kind:{enum:['fixed','flexible','routine','recovery']},status:{enum:['planned','done','skipped']},goalId:{type:'string'},sourceTaskId:{type:'string'},contribution:{type:'number'},contributionUnit:{enum:['hours','sessions','minutes']},runType:{enum:['easy','long','tempo','intervals','recovery']},distanceKm:{type:'number'}}}
 }}}}}as const}

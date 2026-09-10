@@ -610,3 +610,32 @@ test('recentReviews in context expanded to 14 entries', () => {
   const ctx = buildPlannerContext(request(doc, '2026-09-07', 'Plan'));
   assert.equal(ctx.recentReviews.length, 14);
 });
+
+test('flag-at-risk validates targetId and applies correctly', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'flag-at-risk' as const, label: 'Running target at risk', targetId: 'w2' },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, doc), []);
+  const applied = applyProposalAtomically(doc, proposal);
+  assert.equal(applied.ok, true);
+});
+
+test('flag-at-risk is rejected when targetId does not exist', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'flag-at-risk' as const, label: 'Unknown target', targetId: 'w99' },
+  ]);
+  const errors = validateProposalAgainstDocument(proposal, doc);
+  assert.ok(errors.some(e => e.includes('w99')));
+});
+
+test('new actions set-week-plan and rebalance-week pass validation', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'set-week-plan' as const, label: 'Plan remaining week' },
+    { id: 'c2', action: 'rebalance-week' as const, label: 'Redistribute after skip' },
+  ]);
+  assert.deepEqual(validateProposalAgainstDocument(proposal, doc), []);
+  assert.ok(validateProposalShape(proposal));
+});
