@@ -327,3 +327,77 @@ test('reviews appear in AI planning context', () => {
   assert.equal(context.recentReviews[1].date, '2026-09-05');
   assert.equal(context.recentReviews[1].struggle, 'Skipped Dutch');
 });
+
+test('migration populates customCategories from existing goals and sessions', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  delete (doc.profile as any).customCategories;
+  const migrated = migratePlannerData(doc, '2026-09-07');
+  assert.ok(Array.isArray(migrated.profile.customCategories));
+  assert.ok(migrated.profile.customCategories!.length > 0);
+  assert.ok(migrated.profile.customCategories!.includes('fitness'));
+});
+
+test('default document includes customCategories', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  assert.ok(Array.isArray(doc.profile.customCategories));
+  assert.ok(doc.profile.customCategories!.includes('personal'));
+});
+
+test('adding a goal creates corresponding weekly target', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const goalId = 'g-test-new', targetId = 'w-test-new';
+  const goal = { id: goalId, title: 'Test Goal', category: 'personal', priority: 2 as const, active: true, measure: 'count' };
+  const target = { id: targetId, goalId, label: 'Test Goal', category: 'personal', priority: 2 as const, target: 10, unit: 'count' };
+  const updated = { ...doc, goals: [...doc.goals, goal], weeklyTargetTemplates: [...doc.weeklyTargetTemplates, target], weeks: doc.weeks.map(w => ({ ...w, targets: [...w.targets, { ...target }] })) };
+  assert.ok(updated.goals.find(g => g.id === goalId));
+  assert.ok(updated.weeklyTargetTemplates.find(t => t.goalId === goalId));
+  assert.ok(updated.weeks[0].targets.find(t => t.goalId === goalId));
+});
+
+test('deleting a goal removes its weekly targets', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const goalId = doc.goals[0].id;
+  const updated = { ...doc, goals: doc.goals.filter(g => g.id !== goalId), weeklyTargetTemplates: doc.weeklyTargetTemplates.filter(t => t.goalId !== goalId), weeks: doc.weeks.map(w => ({ ...w, targets: w.targets.filter(t => t.goalId !== goalId) })) };
+  assert.ok(!updated.goals.find(g => g.id === goalId));
+  assert.ok(!updated.weeklyTargetTemplates.find(t => t.goalId === goalId));
+  assert.ok(!updated.weeks[0].targets.find(t => t.goalId === goalId));
+});
+
+test('editing a goal propagates to weekly targets', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const goalId = doc.goals[0].id;
+  const updated = { ...doc, goals: doc.goals.map(g => g.id === goalId ? { ...g, title: 'Updated Title', category: 'work' } : g), weeklyTargetTemplates: doc.weeklyTargetTemplates.map(t => t.goalId === goalId ? { ...t, label: 'Updated Title', category: 'work', target: 99 } : t), weeks: doc.weeks.map(w => ({ ...w, targets: w.targets.map(t => t.goalId === goalId ? { ...t, label: 'Updated Title', category: 'work', target: 99 } : t) })) };
+  assert.equal(updated.goals.find(g => g.id === goalId)?.title, 'Updated Title');
+  assert.equal(updated.weeklyTargetTemplates.find(t => t.goalId === goalId)?.label, 'Updated Title');
+  assert.equal(updated.weeks[0].targets.find(t => t.goalId === goalId)?.target, 99);
+});
+
+test('profile fields save and load correctly', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const updated = { ...doc, profile: { ...doc.profile, morningPerson: true, deepWorkPreference: 'morning' as const, workSchedule: 'Mon-Fri 9-5', gymDaysPerWeek: 3, cookingPreference: 'once-daily', planningStyle: 'flexible' } };
+  assert.equal(updated.profile.morningPerson, true);
+  assert.equal(updated.profile.deepWorkPreference, 'morning');
+  assert.equal(updated.profile.workSchedule, 'Mon-Fri 9-5');
+  assert.equal(updated.profile.gymDaysPerWeek, 3);
+  assert.equal(updated.profile.cookingPreference, 'once-daily');
+  assert.equal(updated.profile.planningStyle, 'flexible');
+  const migrated = migratePlannerData(updated, '2026-09-07');
+  assert.equal(migrated.profile.morningPerson, true);
+  assert.equal(migrated.profile.workSchedule, 'Mon-Fri 9-5');
+});
+
+test('profile summary appears in AI planning context', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  doc.profile.morningPerson = true;
+  doc.profile.gymDaysPerWeek = 4;
+  doc.profile.workSchedule = 'Flexible remote';
+  const context = buildPlannerContext({
+    trigger: 'conversation', message: 'Plan', document: doc,
+    now: '2026-09-07T10:00:00.000Z', currentLocalDate: '2026-09-07',
+    selectedDate: '2026-09-07', currentWeekId: startOfIsoWeek('2026-09-07'), timezone: 'Europe/Amsterdam',
+  });
+  assert.ok(typeof context.profileSummary === 'string');
+  assert.ok(context.profileSummary.includes('morningPerson: yes'));
+  assert.ok(context.profileSummary.includes('gymDaysPerWeek: 4'));
+  assert.ok(context.profileSummary.includes('workSchedule: Flexible remote'));
+});

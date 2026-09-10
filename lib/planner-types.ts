@@ -1,6 +1,6 @@
 export type Priority = 1 | 2 | 3;
-export type TargetUnit = 'hours' | 'sessions' | 'km' | 'count';
-export type Category = 'internship' | 'dutch' | 'sabzapply' | 'fitness' | 'learning' | 'personal' | 'routine' | 'cooking' | 'free' | 'work';
+export type TargetUnit = string;
+export type Category = string;
 export type Goal = { id:string; title:string; category:Category; priority:Priority; active:boolean; targetDate?:string; notes?:string; measure?:string };
 export type WeeklyTarget = { id:string; goalId:string; label:string; category:Category; priority:Priority; target:number; unit:TargetUnit; baselineDone?:number };
 export type WeekRecord = { weekId:string; startDate:string; endDate:string; targets:WeeklyTarget[]; createdAt:string; source:'rollover'|'migration'|'manual' };
@@ -13,7 +13,7 @@ export type ProposalChange = { id:string; action:'add'|'remove'|'move'|'shorten'
 export type PlanProposal = { id:string; title:string; summary:string; reasoning:string[]; tradeoffs:string[]; changes:ProposalChange[]; createdAt:string; selectedDate:string; weekId:string };
 export type PlannerDocument = {
   version:5;
-  profile:{ name:string; timezone:string; wakeTime:string; sleepTime:string; deepWorkWindow:string; workoutWindow:string; dailyFocusCapacityHours:number; planningAggressiveness:'gentle'|'balanced'|'ambitious'; preferences:string[]; context:string };
+  profile:{ name:string; timezone:string; wakeTime:string; sleepTime:string; deepWorkWindow:string; workoutWindow:string; dailyFocusCapacityHours:number; planningAggressiveness:'gentle'|'balanced'|'ambitious'; preferences:string[]; context:string; morningPerson?:boolean; deepWorkPreference?:'morning'|'afternoon'|'evening'; workSchedule?:string; fixedCommitments?:string; unavailableDays?:string; gymDaysPerWeek?:number; runDaysPerWeek?:number; workoutTimePreference?:'morning'|'afternoon'|'evening'; cookingPreference?:string; breakPreference?:string; eveningPreference?:string; planningStyle?:string; customCategories?:string[] };
   goals:Goal[];
   monthlyTargets:{id:string;month:string;goalId:string;label:string;target:number;unit:TargetUnit;done:number}[];
   weeklyTargetTemplates:WeeklyTarget[];
