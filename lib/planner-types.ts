@@ -1,19 +1,19 @@
 export type Priority = 1 | 2 | 3;
-export type TargetUnit = string;
+export type TargetUnit = 'sessions' | 'hours' | 'minutes';
 export type Category = string;
 export type Goal = { id:string; title:string; category:Category; priority:Priority; active:boolean; targetDate?:string; notes?:string; measure?:string };
-export type WeeklyTarget = { id:string; goalId:string; label:string; category:Category; priority:Priority; target:number; unit:TargetUnit; baselineDone?:number };
+export type WeeklyTarget = { id:string; goalId:string; label:string; category:Category; priority:Priority; target:number; unit:TargetUnit; baselineDone?:number; completedValue?:number };
 export type WeekRecord = { weekId:string; startDate:string; endDate:string; targets:WeeklyTarget[]; createdAt:string; source:'rollover'|'migration'|'manual' };
 export type Task = { id:string; title:string; goalId?:string; category:Category; priority:Priority; status:'active'|'done'; deadline?:string; estimatedMinutes?:number };
 export type OngoingTask = { id:string; text:string; done:boolean; deadline:string|null; category:Category; priority:Priority; createdAt:string; completedAt?:string|null };
 export type Session = { id:string; date:string; start:string; duration:number; title:string; category:Category; kind:'fixed'|'flexible'|'routine'|'recovery'; status:'planned'|'done'|'skipped'; goalId?:string; sourceTaskId?:string; contribution?:number; contributionUnit?:TargetUnit; runType?:'easy'|'long'|'tempo'|'intervals'|'recovery'; distanceKm?:number };
 export type Review = { id:string; date:string; score:number; win:string; blocker:string; struggle?:string; carryForward?:string; reviewedAt?:string };
 export type MemoryProposal = { id:string; text:string; reason:string; status:'pending'|'approved'|'rejected' };
-export type ProposalChange = { id:string; action:'add'|'remove'|'move'|'shorten'|'update-goal'|'update-target'|'add-commitment'; sessionId?:string; label:string; from?:string; to?:string; session?:Session; patch?:{date?:string;start?:string;duration?:number;contribution?:number;distanceKm?:number}; goalId?:string; priority?:Priority; targetId?:string; target?:number; userReported?:boolean };
+export type ProposalChange = { id:string; action:'add'|'remove'|'move'|'shorten'|'update-goal'|'update-target'|'add-commitment'|'set-week-plan'|'rebalance-week'|'flag-at-risk'; sessionId?:string; label:string; from?:string; to?:string; session?:Session; patch?:{date?:string;start?:string;duration?:number;contribution?:number;distanceKm?:number}; goalId?:string; priority?:Priority; targetId?:string; target?:number; userReported?:boolean };
 export type PlanProposal = { id:string; title:string; summary:string; reasoning:string[]; tradeoffs:string[]; changes:ProposalChange[]; createdAt:string; selectedDate:string; weekId:string };
 export type CalendarEvent = { id:string; title:string; date:string; startTime:string; endTime:string; location:string|null; allDay:boolean; source:'google-calendar' };
 export type PlannerDocument = {
-  version:5;
+  version:6;
   profile:{ name:string; timezone:string; wakeTime:string; sleepTime:string; deepWorkWindow:string; workoutWindow:string; dailyFocusCapacityHours:number; planningAggressiveness:'gentle'|'balanced'|'ambitious'; preferences:string[]; context:string; morningPerson?:boolean; deepWorkPreference?:'morning'|'afternoon'|'evening'; workSchedule?:string; fixedCommitments?:string; unavailableDays?:string; gymDaysPerWeek?:number; runDaysPerWeek?:number; workoutTimePreference?:'morning'|'afternoon'|'evening'; cookingPreference?:string; breakPreference?:string; eveningPreference?:string; planningStyle?:string; customCategories?:string[]; calendarIcsUrl?:string; calendarLastSync?:string };
   goals:Goal[];
   monthlyTargets:{id:string;month:string;goalId?:string;label:string;target:number;unit:TargetUnit;done:number}[];

@@ -1,7 +1,7 @@
 import { DATE_RE, TIME_RE, weekIdForDate } from './date-utils';
 import type { PlanProposal, PlannerDocument, Priority } from './planner-types';
 
-export const PROPOSAL_ACTIONS=['add','remove','move','shorten','update-goal','update-target','add-commitment'] as const;
+export const PROPOSAL_ACTIONS=['add','remove','move','shorten','update-goal','update-target','add-commitment','set-week-plan','rebalance-week','flag-at-risk'] as const;
 
 export function validateProposalShape(value:unknown):value is PlanProposal{
   if(!value||typeof value!=='object')return false;const p=value as PlanProposal;
@@ -76,11 +76,7 @@ export function applyProposalAtomically(doc:PlannerDocument,proposal:PlanProposa
       const patch=c.patch!,next={...s};
       if(patch.duration!==undefined)next.duration=patch.duration;
       if(patch.contribution!==undefined)next.contribution=patch.contribution;
-      if(patch.distanceKm!==undefined){
-        next.distanceKm=patch.distanceKm;
-        // Weekly km progress reads `contribution` first, so keep the two in step.
-        if(patch.contribution===undefined&&s.contributionUnit==='km')next.contribution=patch.distanceKm;
-      }
+      if(patch.distanceKm!==undefined)next.distanceKm=patch.distanceKm;
       return next;
     });
     else if(c.action==='update-goal')goals=goals.map(g=>g.id===c.goalId?{...g,priority:c.priority as Priority}:g);
@@ -105,5 +101,5 @@ export function proposalJsonSchema(){return{type:'object',additionalProperties:f
   target:{type:'number',description:'New weekly target amount, in that target’s own unit. Required by update-target.'},
   userReported:{type:'boolean',description:'Set to true when the user explicitly reported a fixed commitment changed. Allows moving fixed sessions to reflect reality. Never set when proactively rescheduling.'},
   patch:{type:'object',additionalProperties:false,description:'Field updates for move and shorten.',properties:{date:{type:'string'},start:{type:'string'},duration:{type:'number',description:'New length in minutes, 15–720.'},contribution:{type:'number',description:'New amount this session contributes to its weekly target, in that target’s unit.'},distanceKm:{type:'number',description:'New running distance in kilometres.'}}},
-  session:{type:'object',additionalProperties:false,required:['id','date','start','duration','title','category','kind','status'],properties:{id:{type:'string'},date:{type:'string'},start:{type:'string'},duration:{type:'number'},title:{type:'string'},category:{enum:['internship','dutch','sabzapply','fitness','learning','personal','routine','cooking','free','work']},kind:{enum:['fixed','flexible','routine','recovery']},status:{enum:['planned','done','skipped']},goalId:{type:'string'},sourceTaskId:{type:'string'},contribution:{type:'number'},contributionUnit:{enum:['hours','sessions','km','count']},runType:{enum:['easy','long','tempo','intervals','recovery']},distanceKm:{type:'number'}}}
+  session:{type:'object',additionalProperties:false,required:['id','date','start','duration','title','category','kind','status'],properties:{id:{type:'string'},date:{type:'string'},start:{type:'string'},duration:{type:'number'},title:{type:'string'},category:{enum:['internship','dutch','sabzapply','fitness','learning','personal','routine','cooking','free','work']},kind:{enum:['fixed','flexible','routine','recovery']},status:{enum:['planned','done','skipped']},goalId:{type:'string'},sourceTaskId:{type:'string'},contribution:{type:'number'},contributionUnit:{enum:['hours','sessions','minutes']},runType:{enum:['easy','long','tempo','intervals','recovery']},distanceKm:{type:'number'}}}
 }}}}}as const}

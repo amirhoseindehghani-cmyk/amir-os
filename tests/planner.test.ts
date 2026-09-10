@@ -163,28 +163,25 @@ test('update-goal still applies a genuine priority change', () => {
   if (applied.ok) assert.equal(applied.document.goals.find((goal) => goal.id === 'g-marathon')?.priority, 1);
 });
 
-test('shorten can retune a run distance and weekly km follow it', () => {
+test('shorten can change a session duration and hours-based target follows', () => {
   const doc = createDefaultDocument('2026-09-07');
   const snapshot = structuredClone(doc);
   const week = getWeek(doc, '2026-09-07');
   assert.ok(week);
-  const running = week.targets.find((target) => target.unit === 'km');
-  assert.ok(running);
-  const before = targetMetrics(doc, week, running).planned;
+  const internship = week.targets.find((target) => target.goalId === 'g-internship');
+  assert.ok(internship);
+  const before = targetMetrics(doc, week, internship).planned;
 
   const proposal = proposalWith('2026-09-07', [
-    { id: 'c1', action: 'shorten', sessionId: 'run-today', label: 'Adjust run contribution to 6 km', from: '7 km', to: '6 km', patch: { distanceKm: 6 } },
+    { id: 'c1', action: 'shorten', sessionId: 'internship-1', label: 'Shorten internship block', from: '90 min', to: '60 min', patch: { duration: 60 } },
   ]);
   assert.deepEqual(validateProposalAgainstDocument(proposal, doc), []);
   const applied = applyProposalAtomically(doc, proposal);
   assert.equal(applied.ok, true);
   if (!applied.ok) return;
 
-  const run = applied.document.sessions.find((session) => session.id === 'run-today');
-  assert.equal(run?.distanceKm, 6);
-  assert.equal(run?.contribution, 6, 'contribution tracks distance so weekly km stay correct');
-  const after = targetMetrics(applied.document, getWeek(applied.document, '2026-09-07')!, running).planned;
-  assert.equal(after, before - 1);
+  const session = applied.document.sessions.find((s) => s.id === 'internship-1');
+  assert.equal(session?.duration, 60);
   assert.deepEqual(doc, snapshot, 'the source document is untouched');
 });
 
@@ -202,7 +199,7 @@ test('update-target changes a weekly target without touching other weeks', () =>
   const doc = createDefaultDocument('2026-09-07');
   const snapshot = structuredClone(doc);
   const proposal = proposalWith('2026-09-07', [
-    { id: 'c1', action: 'update-target', label: 'Ease weekly running to 20 km', targetId: 'w2', target: 20 },
+    { id: 'c1', action: 'update-target', label: 'Ease weekly running to 3 sessions', targetId: 'w2', target: 3 },
   ]);
   assert.deepEqual(validateProposalAgainstDocument(proposal, doc), []);
   const applied = applyProposalAtomically(doc, proposal);
@@ -210,8 +207,8 @@ test('update-target changes a weekly target without touching other weeks', () =>
   if (!applied.ok) return;
 
   const week = getWeek(applied.document, '2026-09-07');
-  assert.equal(week?.targets.find((target) => target.id === 'w2')?.target, 20);
-  assert.equal(applied.document.weeklyTargetTemplates.find((target) => target.id === 'w2')?.target, 25, 'templates are not rewritten');
+  assert.equal(week?.targets.find((target) => target.id === 'w2')?.target, 3);
+  assert.equal(applied.document.weeklyTargetTemplates.find((target) => target.id === 'w2')?.target, 4, 'templates are not rewritten');
   assert.deepEqual(doc, snapshot, 'the source document is untouched');
 });
 
@@ -231,6 +228,35 @@ test('the tool schema advertises exactly the actions the validator accepts', () 
   assert.ok(validateProposalShape(proposalWith('2026-09-07', [
     { id: 'c1', action: 'update-target', label: 'Ease running', targetId: 'w2', target: 20 },
   ])));
+});
+
+test('v5-to-v6 migration normalizes km units to sessions', () => {
+  const v5 = {
+    ...createDefaultDocument('2026-09-07'),
+    version: 5,
+    weeklyTargetTemplates: [
+      { id: 'w1', goalId: 'g-internship', label: 'Internship', category: 'internship', priority: 1, target: 6, unit: 'hours' },
+      { id: 'w2', goalId: 'g-marathon', label: 'Running', category: 'fitness', priority: 2, target: 25, unit: 'km' },
+    ],
+    sessions: [
+      { id: 'run-1', date: '2026-09-07', start: '16:00', duration: 55, title: 'Easy run', category: 'fitness', kind: 'flexible', status: 'done', goalId: 'g-marathon', contribution: 7, contributionUnit: 'km', runType: 'easy', distanceKm: 7 },
+    ],
+    monthlyTargets: [{ id: 'm1', month: '2026-09', goalId: 'g-marathon', label: 'Run 100 km', target: 100, unit: 'km', done: 0 }],
+  } as any;
+  v5.weeks = [{ ...v5.weeks[0], targets: v5.weeklyTargetTemplates.map((t: any) => ({ ...t })) }];
+  const migrated = migratePlannerData(v5, '2026-09-07');
+  assert.equal(migrated.version, 6);
+  const running = migrated.weeklyTargetTemplates.find(t => t.goalId === 'g-marathon');
+  assert.ok(running);
+  assert.equal(running.unit, 'sessions');
+  assert.equal(running.target, 4);
+  const runSession = migrated.sessions.find(s => s.id === 'run-1');
+  assert.ok(runSession);
+  assert.equal(runSession.contributionUnit, 'sessions');
+  assert.equal(runSession.contribution, 1);
+  assert.equal(runSession.distanceKm, 7);
+  assert.equal(migrated.monthlyTargets[0].unit, 'sessions');
+  assert.equal(migrated.monthlyTargets[0].target, 14);
 });
 
 test('migration adds empty ongoingTasks array when field is missing', () => {
@@ -347,7 +373,7 @@ test('adding a goal creates corresponding weekly target', () => {
   const doc = createDefaultDocument('2026-09-07');
   const goalId = 'g-test-new', targetId = 'w-test-new';
   const goal = { id: goalId, title: 'Test Goal', category: 'personal', priority: 2 as const, active: true, measure: 'count' };
-  const target = { id: targetId, goalId, label: 'Test Goal', category: 'personal', priority: 2 as const, target: 10, unit: 'count' };
+  const target = { id: targetId, goalId, label: 'Test Goal', category: 'personal', priority: 2 as const, target: 10, unit: 'sessions' as const };
   const updated = { ...doc, goals: [...doc.goals, goal], weeklyTargetTemplates: [...doc.weeklyTargetTemplates, target], weeks: doc.weeks.map(w => ({ ...w, targets: [...w.targets, { ...target }] })) };
   assert.ok(updated.goals.find(g => g.id === goalId));
   assert.ok(updated.weeklyTargetTemplates.find(t => t.goalId === goalId));
@@ -416,7 +442,7 @@ test('default document has monthly targets with optional goalId', () => {
 
 test('monthly target goalId is optional', () => {
   const doc = createDefaultDocument('2026-09-07');
-  doc.monthlyTargets.push({ id: 'm-test', month: '2026-09', label: 'Read 4 books', target: 4, unit: 'books', done: 1 });
+  doc.monthlyTargets.push({ id: 'm-test', month: '2026-09', label: 'Read 4 books', target: 4, unit: 'sessions', done: 1 });
   assert.equal(doc.monthlyTargets.at(-1)!.goalId, undefined);
   assert.equal(doc.monthlyTargets.at(-1)!.label, 'Read 4 books');
   assert.equal(doc.monthlyTargets.at(-1)!.done, 1);
