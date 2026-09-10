@@ -440,6 +440,7 @@ function ProfileView({ doc, setDoc, onMemory, onExport, onImport }: { doc: Plann
   </section>;
 }
 
+const TASKS_PER_CATEGORY = 4;
 const DEFAULT_CATEGORIES: string[] = ['sabzapply', 'internship', 'fitness', 'dutch', 'learning', 'cooking', 'personal', 'work'];
 function deadlineStatus(deadline: string | null, localToday: string): { label: string; cls: string } | null {
   if (!deadline) return null;
@@ -520,15 +521,17 @@ function AddTaskForm({ onAdd, categories }: { onAdd: (task: Omit<OngoingTask, 'i
 
 function OngoingSection({ doc, setDoc, selectedDate, localToday, compact }: { doc: PlannerDocument; setDoc: Dispatch<SetStateAction<PlannerDocument>>; selectedDate: string; localToday: string; compact?: boolean }) {
   const [showCompleted, setShowCompleted] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const active = doc.ongoingTasks.filter(t => !t.done), done = doc.ongoingTasks.filter(t => t.done);
   const groups = groupByCategory(active);
   const addTask = (task: Omit<OngoingTask, 'id' | 'createdAt'>) => setDoc(c => ({ ...c, ongoingTasks: [...c.ongoingTasks, { ...task, id: `ongoing-${crypto.randomUUID()}`, createdAt: new Date().toISOString() }] }));
   return <div className="ongoing-section">
     <div className="ongoing-head"><div className="section-label"><ListTodo size={14} /> Ongoing tasks</div><span style={{ fontSize: 12, color: '#8b8a83' }}>{active.length} active{done.length ? ` · ${done.length} done` : ''}</span></div>
-    {groups.map(([category, tasks]) => <div key={category} className="ongoing-group">
+    {groups.map(([category, tasks]) => { const isExpanded = expanded[category] ?? false; const visible = isExpanded ? tasks : tasks.slice(0, TASKS_PER_CATEGORY); const hidden = tasks.length - TASKS_PER_CATEGORY; return <div key={category} className="ongoing-group">
       <div className="ongoing-group-header"><span className="cat-dot" style={{ background: cat(category).dot }} />{cat(category).label}</div>
-      {tasks.map(task => <OngoingTaskRow key={task.id} task={task} doc={doc} setDoc={setDoc} selectedDate={selectedDate} localToday={localToday} />)}
-    </div>)}
+      {visible.map(task => <OngoingTaskRow key={task.id} task={task} doc={doc} setDoc={setDoc} selectedDate={selectedDate} localToday={localToday} />)}
+      {hidden > 0 && <button className="show-more-toggle" onClick={() => setExpanded(prev => ({ ...prev, [category]: !isExpanded }))}>{isExpanded ? <><ChevronDown size={14} /> Show less</> : <><ChevronRight size={14} /> Show {hidden} more</>}</button>}
+    </div>; })}
     {!groups.length && !done.length && <div style={{ padding: '16px 0', color: '#8b8a83', fontSize: 13 }}>No ongoing tasks yet. Add one below.</div>}
     <AddTaskForm onAdd={addTask} categories={doc.profile.customCategories ?? DEFAULT_CATEGORIES} />
     {done.length > 0 && <button className="completed-toggle" onClick={() => setShowCompleted(!showCompleted)}>{showCompleted ? <ChevronDown /> : <ChevronRight />} Show {done.length} completed</button>}
