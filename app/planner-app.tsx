@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Activity, ArrowRight, ArrowUp, Brain, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Download, Flag, Gauge, ListTodo, MapPin, MoreHorizontal, Play, Plus, RefreshCw, Settings2, Sparkles, Target, Trash2, Upload, X } from 'lucide-react';
+import { Activity, ArrowRight, ArrowUp, ArrowUpDown, Brain, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Download, Flag, Gauge, ListTodo, MapPin, MoreHorizontal, Play, Plus, RefreshCw, RotateCcw, Search, Settings2, Sparkles, Target, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
@@ -451,10 +451,16 @@ function deadlineStatus(deadline: string | null, localToday: string): { label: s
   if (diff <= 3) return { label: `Due in ${Math.round(diff)}d`, cls: 'deadline-soon' };
   return { label: deadline.slice(5), cls: 'deadline-later' };
 }
-function groupByCategory(tasks: OngoingTask[]) {
+function groupByCategory(tasks: OngoingTask[], sortMode: 'priority' | 'deadline' = 'priority') {
   const groups: Record<string, OngoingTask[]> = {};
   for (const task of tasks) { (groups[task.category] ??= []).push(task); }
-  for (const key of Object.keys(groups)) groups[key].sort((a, b) => a.priority - b.priority);
+  for (const key of Object.keys(groups)) {
+    if (sortMode === 'deadline') {
+      groups[key].sort((a, b) => { const da = a.deadline ?? '￿', db = b.deadline ?? '￿'; return da !== db ? da.localeCompare(db) : a.priority - b.priority; });
+    } else {
+      groups[key].sort((a, b) => a.priority !== b.priority ? a.priority - b.priority : (a.deadline ?? '￿').localeCompare(b.deadline ?? '￿'));
+    }
+  }
   return Object.entries(groups).sort(([, a], [, b]) => a[0].priority - b[0].priority);
 }
 
@@ -470,7 +476,8 @@ function OngoingTaskRow({ task, doc, setDoc, selectedDate, localToday }: { task:
   const [schedTime, setSchedTime] = useState('14:00'), [schedDuration, setSchedDuration] = useState('60'), [schedDay, setSchedDay] = useState(selectedDate);
   const [confirming, setConfirming] = useState(false);
   const dl = deadlineStatus(task.deadline, localToday);
-  const toggleDone = () => setDoc(c => ({ ...c, ongoingTasks: c.ongoingTasks.map(t => t.id === task.id ? { ...t, done: !t.done } : t) }));
+  const toggleDone = () => setDoc(c => ({ ...c, ongoingTasks: c.ongoingTasks.map(t => t.id === task.id ? { ...t, done: !t.done, completedAt: t.done ? null : new Date().toISOString() } : t) }));
+  const bumpPriority = () => setDoc(c => ({ ...c, ongoingTasks: c.ongoingTasks.map(t => t.id === task.id ? { ...t, priority: (t.priority === 1 ? 3 : t.priority - 1) as Priority } : t) }));
   const updateText = () => { if (editText.trim() && editText !== task.text) setDoc(c => ({ ...c, ongoingTasks: c.ongoingTasks.map(t => t.id === task.id ? { ...t, text: editText.trim() } : t) })); setEditing(false); };
   const deleteTask = () => setDoc(c => ({ ...c, ongoingTasks: c.ongoingTasks.filter(t => t.id !== task.id) }));
   const promoteToTop3 = () => { if (doc.top3.length >= 3) return; setDoc(c => ({ ...c, top3: [...c.top3, task.text] })); };
@@ -482,7 +489,7 @@ function OngoingTaskRow({ task, doc, setDoc, selectedDate, localToday }: { task:
   return <div>
     <div className={`ongoing-row ${task.done ? 'done-row' : ''}`}>
       <button className={`ongoing-check ${task.done ? 'checked' : ''}`} onClick={toggleDone} aria-label={task.done ? 'Mark not done' : 'Mark done'}>{task.done && <Check />}</button>
-      <span className={`ongoing-badge p${task.priority}`}>P{task.priority}</span>
+      <button className={`ongoing-badge p${task.priority}`} onClick={bumpPriority} title="Cycle priority">P{task.priority}</button>
       {editing ? <input className="ongoing-text-input" autoFocus value={editText} onChange={e => setEditText(e.target.value)} onBlur={updateText} onKeyDown={e => { if (e.key === 'Enter') updateText(); if (e.key === 'Escape') { setEditText(task.text); setEditing(false); } }} /> : <span className="ongoing-text" onClick={() => !task.done && setEditing(true)}>{task.text}</span>}
       {dl && <span className={`deadline-badge ${dl.cls}`}>{dl.label}</span>}
       {!task.done && <div className="ongoing-actions">
@@ -539,17 +546,53 @@ function OngoingSection({ doc, setDoc, selectedDate, localToday, compact }: { do
   </div>;
 }
 
+function QuickAdd({ category, onAdd }: { category: string; onAdd: (task: Omit<OngoingTask, 'id' | 'createdAt'>) => void }) {
+  const [text, setText] = useState('');
+  const [priority, setPriority] = useState<Priority>(2);
+  const [deadline, setDeadline] = useState('');
+  const submit = () => { if (!text.trim()) return; onAdd({ text: text.trim(), done: false, deadline: deadline || null, category, priority }); setText(''); setDeadline(''); setPriority(2); };
+  return <div className="quick-add"><input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); }} placeholder="Add task…" className="quick-add-input" /><button className={`quick-add-priority p${priority}`} onClick={() => setPriority(p => (p === 3 ? 1 : p + 1) as Priority)} title="Cycle priority">P{priority}</button><input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="quick-add-date" /><button className="quick-add-submit" onClick={submit} disabled={!text.trim()}><Plus size={14} /></button></div>;
+}
+
 function TasksView({ doc, setDoc, selectedDate, localToday }: { doc: PlannerDocument; setDoc: Dispatch<SetStateAction<PlannerDocument>>; selectedDate: string; localToday: string }) {
-  const [filter, setFilter] = useState<string>('all');
-  const active = doc.ongoingTasks.filter(t => !t.done), done = doc.ongoingTasks.filter(t => t.done);
-  const overdue = active.filter(t => t.deadline && t.deadline < localToday);
-  const filtered = filter === 'all' ? active : active.filter(t => t.category === filter);
-  const groups = groupByCategory(filtered);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'all' | 'p1' | 'due-soon' | 'overdue'>('all');
+  const [sortMode, setSortMode] = useState<'priority' | 'deadline'>('priority');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [showCompleted, setShowCompleted] = useState(false);
+
+  useEffect(() => { const t = setTimeout(() => setSearch(searchInput), 150); return () => clearTimeout(t); }, [searchInput]);
+
+  const allActive = doc.ongoingTasks.filter(t => !t.done);
+  const allDone = doc.ongoingTasks.filter(t => t.done);
+  const overdueCount = allActive.filter(t => t.deadline && t.deadline < localToday).length;
+
+  let filtered = allActive;
+  if (search) filtered = filtered.filter(t => t.text.toLowerCase().includes(search.toLowerCase()));
+  if (filter === 'p1') filtered = filtered.filter(t => t.priority === 1);
+  else if (filter === 'due-soon') filtered = filtered.filter(t => { if (!t.deadline || t.deadline < localToday) return false; return (parseLocalDate(t.deadline).getTime() - parseLocalDate(localToday).getTime()) / 86_400_000 <= 7; });
+  else if (filter === 'overdue') filtered = filtered.filter(t => t.deadline != null && t.deadline < localToday);
+
+  const groups = groupByCategory(filtered, sortMode);
   const addTask = (task: Omit<OngoingTask, 'id' | 'createdAt'>) => setDoc(c => ({ ...c, ongoingTasks: [...c.ongoingTasks, { ...task, id: `ongoing-${crypto.randomUUID()}`, createdAt: new Date().toISOString() }] }));
+  const restoreTask = (id: string) => setDoc(c => ({ ...c, ongoingTasks: c.ongoingTasks.map(t => t.id === id ? { ...t, done: false, completedAt: null } : t) }));
+
   return <section className="page-section">
-    <div className="page-title"><div><div className="eyebrow">Backlog</div><h1>Ongoing tasks</h1><p>Tasks that aren't tied to a specific time slot — manage alongside your daily schedule.</p></div></div>
-    <div className="tasks-stats"><span><b>{active.length}</b> active</span>{overdue.length > 0 && <span style={{ color: '#c05b46' }}><b>{overdue.length}</b> overdue</span>}<span><b>{done.length}</b> completed</span></div>
-    <div className="tasks-filters"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All</button>{(doc.profile.customCategories ?? DEFAULT_CATEGORIES).map(c => { const count = active.filter(t => t.category === c).length; return count > 0 ? <button key={c} className={filter === c ? 'active' : ''} onClick={() => setFilter(c)}><span className="cat-dot" style={{ background: cat(c).dot, marginRight: 5, display: 'inline-block' }} />{cat(c).label} ({count})</button> : null; })}</div>
-    <OngoingSection doc={doc} setDoc={setDoc} selectedDate={selectedDate} localToday={localToday} />
+    <div className="page-title"><div><div className="eyebrow">Backlog</div><h1>Ongoing tasks</h1><p>Tasks that aren't tied to a specific time slot.</p></div><button className="sort-toggle" onClick={() => setSortMode(m => m === 'priority' ? 'deadline' : 'priority')}><ArrowUpDown size={14} />{sortMode === 'priority' ? 'Priority' : 'Deadline'}</button></div>
+    <div className="tasks-stats"><span><b>{allActive.length}</b> active</span>{overdueCount > 0 && <span style={{ color: '#c05b46' }}><b>{overdueCount}</b> overdue</span>}<span><b>{allDone.length}</b> completed</span></div>
+    <div className="tasks-search"><Search size={16} /><input value={searchInput} onChange={e => setSearchInput(e.target.value)} placeholder="Search tasks…" />{searchInput && <button onClick={() => setSearchInput('')} aria-label="Clear search"><X size={14} /></button>}</div>
+    <div className="tasks-filter-bar"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All</button><button className={filter === 'p1' ? 'active' : ''} onClick={() => setFilter('p1')}>P1</button><button className={filter === 'due-soon' ? 'active' : ''} onClick={() => setFilter('due-soon')}>Due soon</button><button className={filter === 'overdue' ? 'active' : ''} onClick={() => setFilter('overdue')}>Overdue</button></div>
+    {groups.map(([category, tasks]) => { const isExpanded = expanded[category] ?? false; const visible = isExpanded ? tasks : tasks.slice(0, TASKS_PER_CATEGORY); const hidden = tasks.length - TASKS_PER_CATEGORY; return <div key={category} className="ongoing-group">
+      <div className="ongoing-group-header"><span className="cat-dot" style={{ background: cat(category).dot }} />{cat(category).label}<span className="ongoing-group-count">{tasks.length}</span></div>
+      <QuickAdd category={category} onAdd={addTask} />
+      {visible.map(task => <OngoingTaskRow key={task.id} task={task} doc={doc} setDoc={setDoc} selectedDate={selectedDate} localToday={localToday} />)}
+      {hidden > 0 && <button className="show-more-toggle" onClick={() => setExpanded(prev => ({ ...prev, [category]: !isExpanded }))}>{isExpanded ? <><ChevronDown size={14} /> Show less</> : <><ChevronRight size={14} /> Show {hidden} more</>}</button>}
+    </div>; })}
+    {!groups.length && <div style={{ padding: '32px 0', color: '#8b8a83', fontSize: 13, textAlign: 'center' }}>{search || filter !== 'all' ? 'No tasks match your filters.' : 'No ongoing tasks yet.'}</div>}
+    {allDone.length > 0 && <div className="completed-section">
+      <button className="completed-section-head" onClick={() => setShowCompleted(!showCompleted)}>{showCompleted ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Completed ({allDone.length})</button>
+      {showCompleted && <div className="completed-list">{allDone.map(task => <div key={task.id} className="completed-row"><span className="completed-text">{task.text}</span><span className="completed-meta">{cat(task.category).label}{task.completedAt && <> &middot; {new Date(task.completedAt).toLocaleDateString()}</>}</span><button className="restore-btn" onClick={() => restoreTask(task.id)}><RotateCcw size={13} /> Restore</button></div>)}</div>}
+    </div>}
   </section>;
 }
