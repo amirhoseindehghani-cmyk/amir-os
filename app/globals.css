@@ -186,3 +186,12 @@ body {
 /* Tasks full view */
 .tasks-stats{display:flex;gap:16px;align-items:center;margin-bottom:24px;font-size:13px;color:#7a7973}.tasks-stats b{color:#20211f;font-size:15px}
 .tasks-filters{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}.tasks-filters button{padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid #e4e2dc;background:#fff;color:#6d6c66}.tasks-filters button.active{background:#263c34;color:#fff;border-color:#263c34}
+
+/* Header menu */
+.header-menu-wrap{position:relative}
+.header-menu{position:absolute;top:calc(100% + 6px);right:0;min-width:180px;background:#fff;border:1px solid #e4e2dc;border-radius:12px;box-shadow:0 8px 30px rgba(30,30,26,.12);padding:6px;z-index:30;animation:menuFadeIn .12s ease-out}
+.header-menu button{display:flex;align-items:center;gap:9px;width:100%;padding:10px 12px;border-radius:8px;font-size:13px;font-weight:520;color:#40423e;text-align:left}
+.header-menu button:hover{background:#f4f3ef}
+.header-menu button svg{color:#8b8a83;flex-shrink:0}
+.header-menu-version{padding:8px 12px;border-top:1px solid #eceae5;margin-top:4px;font-size:11px;color:#a5a49e;text-align:center}
+@keyframes menuFadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}

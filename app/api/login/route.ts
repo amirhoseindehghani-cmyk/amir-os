@@ -32,3 +32,13 @@ export async function POST(request: Request) {
   );
   return response;
 }
+
+export async function DELETE(request: Request) {
+  const options = authCookieOptions();
+  const response = new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  response.headers.append(
+    'Set-Cookie',
+    `${AUTH_COOKIE}=; Path=${options.path}; Max-Age=0; HttpOnly; SameSite=Lax${options.secure ? '; Secure' : ''}`,
+  );
+  return response;
+}
