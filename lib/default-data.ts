@@ -42,7 +42,7 @@ export function createDefaultDocument(localDate:string):PlannerDocument{
 export function migratePlannerData(input:unknown,localDate:string):PlannerDocument{
   const fallback=createDefaultDocument(localDate); if(!input||typeof input!=='object')return fallback;
   const raw=input as Record<string,unknown>;
-  if(raw.version===5&&raw.profile&&Array.isArray(raw.weeks)){const doc=raw as PlannerDocument;if(!Array.isArray(doc.ongoingTasks))doc.ongoingTasks=[];return ensureCurrentWeek(repairMondayMigration(doc,localDate),localDate);}
+  if(raw.version===5&&raw.profile&&Array.isArray(raw.weeks)){const doc=raw as PlannerDocument;if(!Array.isArray(doc.ongoingTasks))doc.ongoingTasks=[];if(!Array.isArray(doc.reviews))doc.reviews=[];for(const r of doc.reviews){if(!r.struggle)r.struggle=r.blocker||'';if(!r.carryForward)r.carryForward='';if(!r.reviewedAt)r.reviewedAt='';}return ensureCurrentWeek(repairMondayMigration(doc,localDate),localDate);}
   if(raw.version===4&&raw.profile&&Array.isArray(raw.goals)){
     const old=raw as any, oldTargets:WeeklyTarget[]=(old.weeklyTargets??templates).map((t:any)=>({id:String(t.id),goalId:String(t.goalId),label:String(t.label),category:t.category,priority:t.priority,target:Number(t.target),unit:t.unit,baselineDone:Number(t.done??0)}));
     const completedDates=(old.sessions??[]).filter((s:Session)=>s.status==='done').map((s:Session)=>s.date).sort();
