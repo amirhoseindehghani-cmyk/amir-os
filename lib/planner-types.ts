@@ -9,7 +9,7 @@ export type OngoingTask = { id:string; text:string; done:boolean; deadline:strin
 export type Session = { id:string; date:string; start:string; duration:number; title:string; category:Category; kind:'fixed'|'flexible'|'routine'|'recovery'; status:'planned'|'done'|'skipped'; goalId?:string; sourceTaskId?:string; contribution?:number; contributionUnit?:TargetUnit; runType?:'easy'|'long'|'tempo'|'intervals'|'recovery'; distanceKm?:number };
 export type Review = { id:string; date:string; score:number; win:string; blocker:string; struggle?:string; carryForward?:string; reviewedAt?:string };
 export type MemoryProposal = { id:string; text:string; reason:string; status:'pending'|'approved'|'rejected' };
-export type ProposalChange = { id:string; action:'add'|'remove'|'move'|'shorten'|'update-goal'|'update-target'|'add-commitment'; sessionId?:string; label:string; from?:string; to?:string; session?:Session; patch?:{date?:string;start?:string;duration?:number;contribution?:number;distanceKm?:number}; goalId?:string; priority?:Priority; targetId?:string; target?:number };
+export type ProposalChange = { id:string; action:'add'|'remove'|'move'|'shorten'|'update-goal'|'update-target'|'add-commitment'; sessionId?:string; label:string; from?:string; to?:string; session?:Session; patch?:{date?:string;start?:string;duration?:number;contribution?:number;distanceKm?:number}; goalId?:string; priority?:Priority; targetId?:string; target?:number; userReported?:boolean };
 export type PlanProposal = { id:string; title:string; summary:string; reasoning:string[]; tradeoffs:string[]; changes:ProposalChange[]; createdAt:string; selectedDate:string; weekId:string };
 export type PlannerDocument = {
   version:5;

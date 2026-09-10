@@ -18,7 +18,8 @@ export function validateProposalAgainstDocument(proposal:PlanProposal,doc:Planne
   for(const change of proposal.changes){
     const existing=change.sessionId?doc.sessions.find(s=>s.id===change.sessionId):undefined;
     if(['remove','move','shorten'].includes(change.action)&&!existing)errors.push(`${change.label}: referenced session does not exist${change.sessionId?` (sessionId "${change.sessionId}")`:' (no sessionId was supplied)'}.`);
-    if(existing?.kind==='fixed'&&['remove','move'].includes(change.action))errors.push(`${change.label}: fixed commitments cannot be moved or removed.`);
+    if(existing?.kind==='fixed'&&change.action==='remove')errors.push(`${change.label}: fixed commitments cannot be removed.`);
+    if(existing?.kind==='fixed'&&change.action==='move'&&!change.userReported)errors.push(`${change.label}: fixed commitments cannot be moved unless the user reported the change.`);
     if(change.action==='move'){
       if(!change.patch?.date||!validDate(change.patch.date)||weekIdForDate(change.patch.date)!==proposal.weekId)errors.push(`${change.label}: destination date must be a real date inside week ${proposal.weekId} (received ${show(change.patch?.date)}).`);
       if(!change.patch?.start||!TIME_RE.test(change.patch.start))errors.push(`${change.label}: destination time must be HH:MM (received ${show(change.patch?.start)}).`);
@@ -102,6 +103,7 @@ export function proposalJsonSchema(){return{type:'object',additionalProperties:f
   priority:{type:'integer',enum:[1,2,3],description:'New goal priority. Required by update-goal and must be 1, 2 or 3.'},
   targetId:{type:'string',description:'Existing weekly target id taken from planningWeek.targets. Required by update-target.'},
   target:{type:'number',description:'New weekly target amount, in that target’s own unit. Required by update-target.'},
+  userReported:{type:'boolean',description:'Set to true when the user explicitly reported a fixed commitment changed. Allows moving fixed sessions to reflect reality. Never set when proactively rescheduling.'},
   patch:{type:'object',additionalProperties:false,description:'Field updates for move and shorten.',properties:{date:{type:'string'},start:{type:'string'},duration:{type:'number',description:'New length in minutes, 15–720.'},contribution:{type:'number',description:'New amount this session contributes to its weekly target, in that target’s unit.'},distanceKm:{type:'number',description:'New running distance in kilometres.'}}},
   session:{type:'object',additionalProperties:false,required:['id','date','start','duration','title','category','kind','status'],properties:{id:{type:'string'},date:{type:'string'},start:{type:'string'},duration:{type:'number'},title:{type:'string'},category:{enum:['internship','dutch','sabzapply','fitness','learning','personal','routine','cooking','free','work']},kind:{enum:['fixed','flexible','routine','recovery']},status:{enum:['planned','done','skipped']},goalId:{type:'string'},sourceTaskId:{type:'string'},contribution:{type:'number'},contributionUnit:{enum:['hours','sessions','km','count']},runType:{enum:['easy','long','tempo','intervals','recovery']},distanceKm:{type:'number'}}}
 }}}}}as const}

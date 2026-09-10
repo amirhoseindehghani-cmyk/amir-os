@@ -422,6 +422,41 @@ test('monthly target goalId is optional', () => {
   assert.equal(doc.monthlyTargets.at(-1)!.done, 1);
 });
 
+test('moving a fixed commitment without userReported is rejected', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const fixed = doc.sessions.find((s) => s.kind === 'fixed');
+  assert.ok(fixed);
+  const proposal = proposalWith(fixed.date, [
+    { id: 'move-fixed', action: 'move', sessionId: fixed.id, label: fixed.title, patch: { date: fixed.date, start: '20:00' } },
+  ]);
+  const errors = validateProposalAgainstDocument(proposal, doc);
+  assert.ok(errors.some((e) => e.includes('cannot be moved')));
+});
+
+test('moving a fixed commitment with userReported is allowed', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const fixed = doc.sessions.find((s) => s.kind === 'fixed');
+  assert.ok(fixed);
+  const proposal = proposalWith(fixed.date, [
+    { id: 'move-fixed', action: 'move', sessionId: fixed.id, label: fixed.title, userReported: true, patch: { date: fixed.date, start: '20:00' } },
+  ]);
+  const errors = validateProposalAgainstDocument(proposal, doc);
+  assert.ok(!errors.some((e) => e.includes('cannot be moved')));
+  const result = applyProposalAtomically(doc, proposal);
+  assert.equal(result.ok, true);
+});
+
+test('removing a fixed commitment is always rejected even with userReported', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const fixed = doc.sessions.find((s) => s.kind === 'fixed');
+  assert.ok(fixed);
+  const proposal = proposalWith(fixed.date, [
+    { id: 'remove-fixed', action: 'remove', sessionId: fixed.id, label: fixed.title, userReported: true },
+  ]);
+  const errors = validateProposalAgainstDocument(proposal, doc);
+  assert.ok(errors.some((e) => e.includes('cannot be removed')));
+});
+
 test('monthly target done can be updated without affecting other fields', () => {
   const doc = createDefaultDocument('2026-09-07');
   const mt = doc.monthlyTargets[0];
