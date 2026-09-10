@@ -467,3 +467,81 @@ test('monthly target done can be updated without affecting other fields', () => 
   assert.equal(mt.label, originalLabel);
   assert.equal(mt.target, originalTarget);
 });
+
+test('default document has empty calendarEvents and no calendarIcsUrl', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  assert.deepEqual(doc.calendarEvents, []);
+  assert.equal(doc.profile.calendarIcsUrl, undefined);
+  assert.equal(doc.profile.calendarLastSync, undefined);
+});
+
+test('migration adds empty calendarEvents when field is missing', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const raw = JSON.parse(JSON.stringify(doc));
+  delete raw.calendarEvents;
+  const migrated = migratePlannerData(raw, '2026-09-07');
+  assert.ok(Array.isArray(migrated.calendarEvents));
+  assert.equal(migrated.calendarEvents.length, 0);
+});
+
+test('calendar events appear in AI planning context', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  doc.calendarEvents = [
+    { id: 'cal-1', title: 'Team meeting', date: '2026-09-07', startTime: '10:00', endTime: '11:00', location: 'Room 3', allDay: false, source: 'google-calendar' },
+    { id: 'cal-2', title: 'Dentist', date: '2026-09-10', startTime: '14:00', endTime: '15:00', location: null, allDay: false, source: 'google-calendar' },
+  ];
+  const ctx = buildPlannerContext(request(doc, '2026-09-07', 'Plan my day'));
+  assert.equal(ctx.selectedDayCalendar.length, 1);
+  assert.equal(ctx.selectedDayCalendar[0].title, 'Team meeting');
+  assert.ok(ctx.calendarEvents.length >= 1);
+});
+
+test('ICS parser extracts events correctly', async () => {
+  const { parseIcs } = await import('../lib/ics-parser');
+  const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:test-event-1
+SUMMARY:Team standup
+DTSTART;TZID=Europe/Amsterdam:20260907T100000
+DTEND;TZID=Europe/Amsterdam:20260907T103000
+LOCATION:Room 4B
+END:VEVENT
+BEGIN:VEVENT
+UID:test-event-2
+SUMMARY:All day workshop
+DTSTART;VALUE=DATE:20260908
+DTEND;VALUE=DATE:20260909
+END:VEVENT
+END:VCALENDAR`;
+  const events = parseIcs(ics, 'Europe/Amsterdam', '2026-09-07', '2026-09-14');
+  assert.ok(events.length >= 2);
+  const standup = events.find(e => e.title === 'Team standup');
+  assert.ok(standup);
+  assert.equal(standup.date, '2026-09-07');
+  assert.equal(standup.startTime, '10:00');
+  assert.equal(standup.endTime, '10:30');
+  assert.equal(standup.location, 'Room 4B');
+  assert.equal(standup.allDay, false);
+  const workshop = events.find(e => e.title === 'All day workshop');
+  assert.ok(workshop);
+  assert.equal(workshop.allDay, true);
+  assert.equal(workshop.date, '2026-09-08');
+});
+
+test('ICS parser handles UTC times', async () => {
+  const { parseIcs } = await import('../lib/ics-parser');
+  const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:utc-event
+SUMMARY:UTC Meeting
+DTSTART:20260907T120000Z
+DTEND:20260907T130000Z
+END:VEVENT
+END:VCALENDAR`;
+  const events = parseIcs(ics, 'Europe/Amsterdam', '2026-09-07', '2026-09-14');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].title, 'UTC Meeting');
+  assert.equal(events[0].date, '2026-09-07');
+  assert.equal(events[0].startTime, '14:00');
+  assert.equal(events[0].endTime, '15:00');
+});

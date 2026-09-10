@@ -1,13 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Activity, ArrowRight, ArrowUp, Brain, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Download, Flag, Gauge, ListTodo, MoreHorizontal, Play, Plus, RefreshCw, Settings2, Sparkles, Target, Trash2, Upload, X } from 'lucide-react';
+import { Activity, ArrowRight, ArrowUp, Brain, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock, Download, Flag, Gauge, ListTodo, MapPin, MoreHorizontal, Play, Plus, RefreshCw, Settings2, Sparkles, Target, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import type { Category, Goal, OngoingTask, PlanProposal, PlannerApiResponse, PlannerDocument, Priority, ProposalChange, Review, Session, WeekRecord, WeeklyTarget } from '@/lib/planner-types';
+import type { CalendarEvent, Category, Goal, OngoingTask, PlanProposal, PlannerApiResponse, PlannerDocument, Priority, ProposalChange, Review, Session, WeekRecord, WeeklyTarget } from '@/lib/planner-types';
 import { createDefaultDocument, migratePlannerData } from '@/lib/default-data';
 import { addLocalDays, endOfIsoWeek, formatDateLong, formatWeekRange, localDateInTimeZone, parseLocalDate, startOfIsoWeek } from '@/lib/date-utils';
 import { applyProposalAtomically } from '@/lib/proposal-ops';
@@ -89,6 +89,26 @@ export function PlannerApp() {
     }
     setLoaded(true);
   })(); }, [localToday, loadFromCloud, initialDoc]);
+
+  // Auto-sync calendar in background if stale (>4 hours)
+  useEffect(() => {
+    if (!loaded || !cloudReady) return;
+    const icsUrl = doc.profile.calendarIcsUrl;
+    const lastSync = doc.profile.calendarLastSync;
+    if (!icsUrl) return;
+    const age = lastSync ? (Date.now() - new Date(lastSync).getTime()) / 3600_000 : Infinity;
+    if (age < 4) return;
+    fetch('/api/calendar', { method: 'POST', credentials: 'same-origin' }).then(async res => {
+      if (!res.ok) return;
+      const fresh = await fetch(`/api/state?localDate=${localToday}`, { cache: 'no-store', credentials: 'same-origin' });
+      if (!fresh.ok) return;
+      const payload = await fresh.json() as { document: unknown; updatedAt?: string };
+      if (payload.updatedAt) cloudUpdatedAt.current = payload.updatedAt;
+      const next = migratePlannerData(payload.document, localToday);
+      baselineDoc.current = next; setDoc(next);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, cloudReady]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -226,13 +246,14 @@ function DayView({ doc, setDoc, localToday, selectedDate, sessions, active, next
     <div className="now-grid"><div className="now-card"><span>{selectedDate === localToday ? 'Now' : 'First planned'}</span>{active ? <><h2>{active.title}</h2><p>{active.start}–{endTime(active.start, active.duration)} · {cat(active.category).label}</p><div className="now-actions"><button onClick={() => onToggle(active)}><Check />Mark {active.status === 'done' ? 'planned' : 'done'}</button><button onClick={() => document.getElementById(`session-${active.id}`)?.scrollIntoView({ behavior: 'smooth' })}>Open</button></div></> : <h2>No sessions planned</h2>}</div><div className="next-card"><span>{selectedDate === localToday ? 'Next' : 'After that'}</span>{next ? <><h3>{next.title}</h3><p>{next.start} · {fmtMinutes(next.duration)}</p></> : <><h3>Open capacity</h3><p>No later planned work</p></>}<div className="capacity"><div><span>Daily capacity</span><b>{Math.round(focusMinutes / 6) / 10} / {doc.profile.dailyFocusCapacityHours}h</b></div><Progress value={Math.min(100, focusMinutes / 60 / doc.profile.dailyFocusCapacityHours * 100)} /></div></div></div>
     <DeadlineAlerts tasks={doc.ongoingTasks} localToday={localToday} />
     <div className="priority-strip"><div className="section-label"><Flag /> Priorities</div>{doc.top3.map((priority, index) => <div key={priority}><b>{index + 1}</b><span>{priority}</span></div>)}</div>
-    <div className="plan-head"><div><div className="section-label">{label}’s plan</div><p>This exact date is shared across Day, Week, Month, and AI planning.</p></div><button onClick={onAdd}><Plus /> Add</button></div><div className="timeline">{sessions.length ? sessions.map((session, index) => <SessionRow key={session.id} session={session} last={index === sessions.length - 1} onToggle={() => onToggle(session)} onSkip={() => onSkip(session)} onEdit={() => onEdit(session)} onRemove={() => onRemove(session.id)} isRemoving={removeConfirm === session.id} />) : <div className="empty-day"><CalendarDays /><b>No plan for this date yet.</b><span>Add a session or ask AI to plan it.</span></div>}</div>
+    <div className="plan-head"><div><div className="section-label">{label}'s plan</div><p>This exact date is shared across Day, Week, Month, and AI planning.</p></div><button onClick={onAdd}><Plus /> Add</button></div><div className="timeline">{(() => { const calEvts = (doc.calendarEvents ?? []).filter(e => e.date === selectedDate); const items: Array<{ type: 'session'; data: Session } | { type: 'calendar'; data: CalendarEvent }> = [...sessions.map(s => ({ type: 'session' as const, data: s })), ...calEvts.map(e => ({ type: 'calendar' as const, data: e }))].sort((a, b) => { const ta = a.type === 'session' ? a.data.start : (a.data as CalendarEvent).allDay ? '00:00' : (a.data as CalendarEvent).startTime; const tb = b.type === 'session' ? b.data.start : (b.data as CalendarEvent).allDay ? '00:00' : (b.data as CalendarEvent).startTime; return mins(ta) - mins(tb); }); return items.length ? items.map((item, index) => item.type === 'session' ? <SessionRow key={item.data.id} session={item.data} last={index === items.length - 1} onToggle={() => onToggle(item.data)} onSkip={() => onSkip(item.data)} onEdit={() => onEdit(item.data)} onRemove={() => onRemove(item.data.id)} isRemoving={removeConfirm === item.data.id} /> : <CalendarEventRow key={item.data.id} event={item.data} last={index === items.length - 1} />) : <div className="empty-day"><CalendarDays /><b>No plan for this date yet.</b><span>Add a session or ask AI to plan it.</span></div>; })()}</div>
     {existingReview && <ReviewCard review={existingReview} onEdit={onReview} />}
     <OngoingSection doc={doc} setDoc={setDoc} selectedDate={selectedDate} localToday={localToday} compact />
   </section><aside className="insights"><div className="ai-card"><div className="ai-title"><Brain />Chief of staff</div><p>The planner will optimize from {formatDateLong(selectedDate)}, with fixed commitments and recovery protected.</p><button onClick={onReasoning}>{reasoning ? 'Hide reasoning' : 'View planning context'} <ArrowRight /></button>{reasoning && <ul><li>Selected date: {selectedDate}</li><li>Planning week: {startOfIsoWeek(selectedDate)}</li><li>Fixed commitments cannot be moved by AI.</li></ul>}</div>{week && <div className="week-mini"><div className="section-label">Week · {formatWeekRange(week.weekId)}</div>{week.targets.slice(0, 4).map(target => <MiniTarget key={target.id} doc={doc} week={week} target={target} />)}<button className="text-button" onClick={onOpenWeek}>Open this week <ArrowRight /></button></div>}</aside></div></div>;
 }
 
 function SessionRow({ session, last, onToggle, onSkip, onEdit, onRemove, isRemoving }: { session: Session; last: boolean; onToggle: () => void; onSkip: () => void; onEdit: () => void; onRemove: () => void; isRemoving: boolean }) { return <div id={`session-${session.id}`} className={`session ${session.status === 'done' ? 'done' : ''} ${session.status === 'skipped' ? 'skipped' : ''}`}><div className="time"><b>{session.start}</b><span>{endTime(session.start, session.duration)}</span></div><div className="rail"><button onClick={onToggle} aria-label={`Mark ${session.title} ${session.status === 'done' ? 'planned' : 'done'}`}>{session.status === 'done' ? <Check /> : session.status === 'skipped' ? <X size={14} /> : <span style={{ borderColor: cat(session.category).dot }} />}</button>{!last && <i />}</div><div className="session-body"><div><h3>{session.title}</h3><p><span className="tag" style={{ background: cat(session.category).pale, color: cat(session.category).dot }}>{cat(session.category).label}</span><span>{fmtMinutes(session.duration)}</span>{session.kind === 'fixed' && <span className="fixed"><Flag /> Fixed</span>}{session.sourceTaskId && <span>Linked task</span>}</p></div><div className="session-actions"><button onClick={onEdit} title="Edit session"><Settings2 size={15} /></button><button onClick={onSkip} title={session.status === 'skipped' ? 'Unskip' : 'Skip'}><span className="skip-icon">{session.status === 'skipped' ? '↩' : '⏭'}</span></button>{isRemoving ? <button onClick={onRemove} title="Confirm remove" style={{ color: '#c05b46' }}><Trash2 size={15} /></button> : <button onClick={onRemove} title="Remove"><X size={15} /></button>}</div></div></div>; }
+function CalendarEventRow({ event, last }: { event: CalendarEvent; last: boolean }) { return <div className="session calendar-event"><div className="time"><b>{event.allDay ? 'All day' : event.startTime}</b>{!event.allDay && <span>{event.endTime}</span>}</div><div className="rail"><span className="cal-icon"><CalendarDays size={13} /></span>{!last && <i />}</div><div className="session-body"><div><h3>{event.title}</h3><p><span className="tag cal-tag">Google Calendar</span>{event.location && <span className="cal-location"><MapPin size={11} />{event.location}</span>}</p></div></div></div>; }
 function MiniTarget({ doc, week, target }: { doc: PlannerDocument; week: WeekRecord; target: WeeklyTarget }) { const metrics = targetMetrics(doc, week, target), state = statusFor(metrics); return <div className="mini-target"><div><span className="cat-dot" style={{ background: cat(target.category).dot }} /><b>{target.label}</b><em className={state[1]}>{state[0]}</em></div><p>{metrics.done} done · {metrics.planned} planned · {metrics.remaining} remaining · {metrics.target} target</p><Progress value={Math.min(100, metrics.done / Math.max(1, metrics.target) * 100)} /></div>; }
 function Diff({ change }: { change: ProposalChange }) { const names: Record<ProposalChange['action'], string> = { add: 'Add', remove: 'Remove', move: 'Move', shorten: 'Resize', 'update-goal': 'Priority', 'update-target': 'Weekly target', 'add-commitment': 'Fixed commitment' }; return <article className={`proposal-change ${change.action}`}><div className="change-type">{names[change.action]}</div><div><h3>{change.label}</h3><p>{change.from && <><span>{change.from}</span><ArrowRight /></>}<span>{change.to || (change.session ? `${change.session.date} · ${change.session.start}–${endTime(change.session.start, change.session.duration)}` : '')}</span></p></div></article>; }
 
@@ -350,12 +371,27 @@ function MonthView({ doc, selectedDate, localToday, onDate }: { doc: PlannerDocu
 function ProfileView({ doc, setDoc, onMemory, onExport, onImport }: { doc: PlannerDocument; setDoc: Dispatch<SetStateAction<PlannerDocument>>; onMemory: (id: string, status: 'approved' | 'rejected') => void; onExport: () => void; onImport: () => void }) {
   const [newPref, setNewPref] = useState('');
   const [newCat, setNewCat] = useState('');
+  const [calSyncing, setCalSyncing] = useState(false), [calError, setCalError] = useState(''), [calCount, setCalCount] = useState<number | null>(null);
   const up = (u: Partial<typeof doc.profile>) => setDoc(c => ({ ...c, profile: { ...c.profile, ...u } }));
   const categories = doc.profile.customCategories ?? Object.keys(catMap);
   const removePref = (p: string) => up({ preferences: doc.profile.preferences.filter(x => x !== p) });
   const addPref = () => { if (newPref.trim()) { up({ preferences: [...doc.profile.preferences, newPref.trim()] }); setNewPref(''); } };
   const addCat = () => { const v = newCat.trim().toLowerCase().replace(/\s+/g, '-'); if (v && !categories.includes(v)) { up({ customCategories: [...categories, v] }); setNewCat(''); } };
   const removeCat = (c: string) => up({ customCategories: categories.filter(x => x !== c) });
+  async function syncCalendar() {
+    setCalSyncing(true); setCalError(''); setCalCount(null);
+    try {
+      const res = await fetch('/api/calendar', { method: 'POST', credentials: 'same-origin' });
+      const data = await res.json() as { ok?: boolean; count?: number; error?: string };
+      if (!res.ok || !data.ok) { setCalError(data.error || 'Sync failed'); return; }
+      setCalCount(data.count ?? 0);
+      const stateRes = await fetch(`/api/state?localDate=${doc.lastOpenedLocalDate}`, { cache: 'no-store', credentials: 'same-origin' });
+      if (stateRes.ok) { const payload = await stateRes.json() as { document: unknown }; setDoc(migratePlannerData(payload.document, doc.lastOpenedLocalDate)); }
+    } catch { setCalError('Network error. Try again.'); } finally { setCalSyncing(false); }
+  }
+  const lastSync = doc.profile.calendarLastSync;
+  const syncAge = lastSync ? (Date.now() - new Date(lastSync).getTime()) / 3600_000 : Infinity;
+  const syncDot = !doc.profile.calendarIcsUrl ? 'cal-dot-none' : syncAge < 6 ? 'cal-dot-ok' : syncAge < 24 ? 'cal-dot-stale' : 'cal-dot-none';
   return <section className="page-section">
     <div className="page-title"><div><div className="eyebrow">Settings</div><h1>Profile & preferences</h1><p>All fields are used by the AI planner. Fill in what's relevant to you.</p></div></div>
     <div className="settings-grid">
@@ -368,6 +404,14 @@ function ProfileView({ doc, setDoc, onMemory, onExport, onImport }: { doc: Plann
         <div className="form-grid single-col"><label>Work schedule<Textarea value={doc.profile.workSchedule ?? ''} onChange={e => up({ workSchedule: e.target.value })} placeholder="e.g. Restaurant shifts Tue/Thu evenings" rows={2} /></label><label>Fixed commitments<Textarea value={doc.profile.fixedCommitments ?? ''} onChange={e => up({ fixedCommitments: e.target.value })} placeholder="e.g. Dutch class Wednesday 14:00-15:30" rows={2} /></label><label>Days unavailable<Textarea value={doc.profile.unavailableDays ?? ''} onChange={e => up({ unavailableDays: e.target.value })} placeholder="e.g. Saturdays family day" rows={2} /></label></div>
         <h2 className="profile-section-title">Fitness</h2>
         <div className="form-grid"><label>Gym days/week<Input type="number" min={0} max={7} value={doc.profile.gymDaysPerWeek ?? ''} onChange={e => up({ gymDaysPerWeek: e.target.value ? Number(e.target.value) : undefined })} /></label><label>Run days/week<Input type="number" min={0} max={7} value={doc.profile.runDaysPerWeek ?? ''} onChange={e => up({ runDaysPerWeek: e.target.value ? Number(e.target.value) : undefined })} /></label><label>Workout time<select className="profile-select" value={doc.profile.workoutTimePreference ?? ''} onChange={e => up({ workoutTimePreference: (e.target.value as 'morning' | 'afternoon' | 'evening') || undefined })}><option value="">Not set</option><option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="evening">Evening</option></select></label></div>
+        <h2 className="profile-section-title">Google Calendar</h2>
+        <div className="form-grid single-col">
+          <label>Secret iCal URL<Input value={doc.profile.calendarIcsUrl ?? ''} onChange={e => up({ calendarIcsUrl: e.target.value })} placeholder="Paste your secret iCal URL here" /></label>
+          <p className="cal-help">Go to Google Calendar {'→'} Settings {'→'} your calendar {'→'} {'“'}Secret address in iCal format{'”'} {'→'} copy and paste here</p>
+        </div>
+        <div className="cal-sync-row"><Button size="sm" variant="outline" onClick={syncCalendar} disabled={calSyncing || !doc.profile.calendarIcsUrl}><RefreshCw size={14} className={calSyncing ? 'spin' : ''} />{calSyncing ? 'Syncing...' : 'Sync now'}</Button><span className={`cal-status ${syncDot}`}>{lastSync ? `Last synced ${syncAge < 1 ? 'just now' : syncAge < 24 ? `${Math.round(syncAge)}h ago` : new Date(lastSync).toLocaleDateString()}` : 'Never synced'}</span></div>
+        {calError && <p className="cal-error">{calError}</p>}
+        {calCount !== null && !calError && <p className="cal-success">{calCount} event{calCount !== 1 ? 's' : ''} synced for the next 14 days</p>}
       </article>
       <article>
         <h2>AI planning preferences</h2>

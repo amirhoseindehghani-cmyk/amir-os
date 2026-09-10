@@ -11,9 +11,10 @@ export type Review = { id:string; date:string; score:number; win:string; blocker
 export type MemoryProposal = { id:string; text:string; reason:string; status:'pending'|'approved'|'rejected' };
 export type ProposalChange = { id:string; action:'add'|'remove'|'move'|'shorten'|'update-goal'|'update-target'|'add-commitment'; sessionId?:string; label:string; from?:string; to?:string; session?:Session; patch?:{date?:string;start?:string;duration?:number;contribution?:number;distanceKm?:number}; goalId?:string; priority?:Priority; targetId?:string; target?:number; userReported?:boolean };
 export type PlanProposal = { id:string; title:string; summary:string; reasoning:string[]; tradeoffs:string[]; changes:ProposalChange[]; createdAt:string; selectedDate:string; weekId:string };
+export type CalendarEvent = { id:string; title:string; date:string; startTime:string; endTime:string; location:string|null; allDay:boolean; source:'google-calendar' };
 export type PlannerDocument = {
   version:5;
-  profile:{ name:string; timezone:string; wakeTime:string; sleepTime:string; deepWorkWindow:string; workoutWindow:string; dailyFocusCapacityHours:number; planningAggressiveness:'gentle'|'balanced'|'ambitious'; preferences:string[]; context:string; morningPerson?:boolean; deepWorkPreference?:'morning'|'afternoon'|'evening'; workSchedule?:string; fixedCommitments?:string; unavailableDays?:string; gymDaysPerWeek?:number; runDaysPerWeek?:number; workoutTimePreference?:'morning'|'afternoon'|'evening'; cookingPreference?:string; breakPreference?:string; eveningPreference?:string; planningStyle?:string; customCategories?:string[] };
+  profile:{ name:string; timezone:string; wakeTime:string; sleepTime:string; deepWorkWindow:string; workoutWindow:string; dailyFocusCapacityHours:number; planningAggressiveness:'gentle'|'balanced'|'ambitious'; preferences:string[]; context:string; morningPerson?:boolean; deepWorkPreference?:'morning'|'afternoon'|'evening'; workSchedule?:string; fixedCommitments?:string; unavailableDays?:string; gymDaysPerWeek?:number; runDaysPerWeek?:number; workoutTimePreference?:'morning'|'afternoon'|'evening'; cookingPreference?:string; breakPreference?:string; eveningPreference?:string; planningStyle?:string; customCategories?:string[]; calendarIcsUrl?:string; calendarLastSync?:string };
   goals:Goal[];
   monthlyTargets:{id:string;month:string;goalId?:string;label:string;target:number;unit:TargetUnit;done:number}[];
   weeklyTargetTemplates:WeeklyTarget[];
@@ -21,6 +22,7 @@ export type PlannerDocument = {
   tasks:Task[];
   ongoingTasks:OngoingTask[];
   sessions:Session[];
+  calendarEvents:CalendarEvent[];
   top3:string[];
   reviews:Review[];
   memories:MemoryProposal[];
