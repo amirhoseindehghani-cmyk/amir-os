@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 
     if (rows.length && rows[0].document) {
       return Response.json(
-        { document: migratePlannerData(JSON.parse(rows[0].document), localDate), source: 'cloud' },
+        { document: migratePlannerData(JSON.parse(rows[0].document), localDate), source: 'cloud', updatedAt: rows[0].updatedAt },
         { headers: NO_STORE },
       );
     }

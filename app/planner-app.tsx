@@ -41,7 +41,7 @@ export function PlannerApp() {
   // cloudReady gates every write: a device that could not read the cloud must never
   // push its (possibly default) document over the stored one.
   const [cloudReady, setCloudReady] = useState(false), [syncError, setSyncError] = useState(''), [signedOut, setSignedOut] = useState(false), [offlineEdits, setOfflineEdits] = useState(false);
-  const baselineDoc = useRef<PlannerDocument | null>(null), offlineEditsRef = useRef(false);
+  const baselineDoc = useRef<PlannerDocument | null>(null), offlineEditsRef = useRef(false), cloudUpdatedAt = useRef<string>(''), localDirty = useRef(false);
   const markOfflineEdits = (value: boolean) => { offlineEditsRef.current = value; setOfflineEdits(value); };
   const [view, setView] = useState<'day' | 'week' | 'goals' | 'tasks' | 'month' | 'settings'>('day');
   const [selectedDate, setSelectedDate] = useState(localToday), [weekCursor, setWeekCursor] = useState(currentWeekId);
@@ -63,8 +63,9 @@ export function PlannerApp() {
       const response = await fetch(`/api/state?localDate=${localToday}`, { cache: 'no-store', credentials: 'same-origin' });
       if (response.status === 401) { setSignedOut(true); setCloudReady(false); setSync('offline'); return false; }
       if (!response.ok) throw new Error(response.status === 503 ? 'Cloud storage is unavailable right now, so this device is not syncing.' : `The planner could not be loaded from the cloud (HTTP ${response.status}).`);
-      const payload = await response.json() as { document: unknown };
+      const payload = await response.json() as { document: unknown; updatedAt?: string };
       setSignedOut(false); setCloudReady(true);
+      if (payload.updatedAt) cloudUpdatedAt.current = payload.updatedAt;
       // Edits made while offline are the newest intent, so keep them and let autosave push them up.
       if (!offlineEditsRef.current) { const next = migratePlannerData(payload.document, localToday); baselineDoc.current = next; setDoc(next); setSync('saved'); }
       return true;
@@ -93,6 +94,7 @@ export function PlannerApp() {
     if (!loaded) return;
     localStorage.setItem(CACHE, JSON.stringify(doc));
     const edited = baselineDoc.current !== null && doc !== baselineDoc.current;
+    localDirty.current = edited;
     const timer = setTimeout(async () => {
       if (!cloudReady) { if (edited) markOfflineEdits(true); return; }
       setSync('saving');
@@ -100,7 +102,9 @@ export function PlannerApp() {
         const response = await fetch('/api/state', { method: 'PUT', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(doc) });
         if (response.status === 401) { setSignedOut(true); setCloudReady(false); markOfflineEdits(true); setSync('offline'); return; }
         if (!response.ok) throw new Error(response.status === 503 ? 'Cloud storage is unavailable, so this change is only on this device.' : `This change could not be saved to the cloud (HTTP ${response.status}).`);
-        baselineDoc.current = doc; markOfflineEdits(false); setSyncError(''); setSync('saved');
+        const saved = await response.json() as { updatedAt?: string };
+        if (saved.updatedAt) cloudUpdatedAt.current = saved.updatedAt;
+        baselineDoc.current = doc; localDirty.current = false; markOfflineEdits(false); setSyncError(''); setSync('saved');
       } catch (error) {
         markOfflineEdits(true); setSync('offline');
         setSyncError(error instanceof Error && error.message ? error.message : 'This change is saved on this device only.');
@@ -108,6 +112,28 @@ export function PlannerApp() {
     }, 650);
     return () => clearTimeout(timer);
   }, [doc, loaded, cloudReady]);
+
+  // Cross-device sync: refetch cloud state on tab focus and every 30s.
+  const pullIfNewer = useCallback(async () => {
+    if (!cloudReady || offlineEditsRef.current || localDirty.current) return;
+    try {
+      const res = await fetch(`/api/state?localDate=${localToday}`, { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) return;
+      const payload = await res.json() as { document: unknown; updatedAt?: string };
+      if (!payload.updatedAt || payload.updatedAt <= cloudUpdatedAt.current) return;
+      cloudUpdatedAt.current = payload.updatedAt;
+      const next = migratePlannerData(payload.document, localToday);
+      baselineDoc.current = next; setDoc(next); setSync('saved');
+    } catch { /* silent — the periodic retry will catch it next time */ }
+  }, [cloudReady, localToday]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const onFocus = () => { if (document.visibilityState === 'visible') pullIfNewer(); };
+    document.addEventListener('visibilitychange', onFocus);
+    const poll = setInterval(pullIfNewer, 30_000);
+    return () => { document.removeEventListener('visibilitychange', onFocus); clearInterval(poll); };
+  }, [loaded, pullIfNewer]);
 
   const syncState = sync === 'saving' ? 'saving' : cloudReady ? sync : 'offline';
   const openDate = (date: string) => { setDoc(current => ensureWeekForDate(current, date)); setSelectedDate(date); setWeekCursor(startOfIsoWeek(date)); setView('day'); };
