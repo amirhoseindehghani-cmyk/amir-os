@@ -15,7 +15,7 @@ export type PlannerDocument = {
   version:5;
   profile:{ name:string; timezone:string; wakeTime:string; sleepTime:string; deepWorkWindow:string; workoutWindow:string; dailyFocusCapacityHours:number; planningAggressiveness:'gentle'|'balanced'|'ambitious'; preferences:string[]; context:string; morningPerson?:boolean; deepWorkPreference?:'morning'|'afternoon'|'evening'; workSchedule?:string; fixedCommitments?:string; unavailableDays?:string; gymDaysPerWeek?:number; runDaysPerWeek?:number; workoutTimePreference?:'morning'|'afternoon'|'evening'; cookingPreference?:string; breakPreference?:string; eveningPreference?:string; planningStyle?:string; customCategories?:string[] };
   goals:Goal[];
-  monthlyTargets:{id:string;month:string;goalId:string;label:string;target:number;unit:TargetUnit;done:number}[];
+  monthlyTargets:{id:string;month:string;goalId?:string;label:string;target:number;unit:TargetUnit;done:number}[];
   weeklyTargetTemplates:WeeklyTarget[];
   weeks:WeekRecord[];
   tasks:Task[];

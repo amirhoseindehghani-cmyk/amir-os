@@ -223,6 +223,12 @@ function GoalsView({ doc, setDoc }: { doc: PlannerDocument; setDoc: Dispatch<Set
   const [gTarget, setGTarget] = useState(0);
   const [gUnit, setGUnit] = useState('hours');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [mDialogOpen, setMDialogOpen] = useState(false);
+  const [editingMonthly, setEditingMonthly] = useState<typeof doc.monthlyTargets[0] | null>(null);
+  const [mLabel, setMLabel] = useState('');
+  const [mTarget, setMTarget] = useState(0);
+  const [mUnit, setMUnit] = useState('count');
+  const [mDeleteConfirm, setMDeleteConfirm] = useState<string | null>(null);
   const categories = doc.profile.customCategories ?? Object.keys(catMap);
   function openAdd() { setEditingGoal(null); setGTitle(''); setGCategory(categories[0] ?? 'personal'); setGPriority(2); setGMeasure(''); setGTarget(0); setGUnit('hours'); setDialogOpen(true); }
   function openEdit(goal: Goal) { const tpl = doc.weeklyTargetTemplates.find(t => t.goalId === goal.id); setEditingGoal(goal); setGTitle(goal.title); setGCategory(goal.category); setGPriority(goal.priority); setGMeasure(goal.measure ?? ''); setGTarget(tpl?.target ?? 0); setGUnit(tpl?.unit ?? 'hours'); setDialogOpen(true); }
@@ -244,6 +250,25 @@ function GoalsView({ doc, setDoc }: { doc: PlannerDocument; setDoc: Dispatch<Set
     setDoc(c => ({ ...c, goals: c.goals.filter(g => g.id !== id), weeklyTargetTemplates: c.weeklyTargetTemplates.filter(t => t.goalId !== id), weeks: c.weeks.map(w => ({ ...w, targets: w.targets.filter(t => t.goalId !== id) })) }));
     setDeleteConfirm(null);
   }
+  function openAddMonthly() { setEditingMonthly(null); setMLabel(''); setMTarget(0); setMUnit('count'); setMDialogOpen(true); }
+  function openEditMonthly(mt: typeof doc.monthlyTargets[0]) { setEditingMonthly(mt); setMLabel(mt.label); setMTarget(mt.target); setMUnit(mt.unit); setMDialogOpen(true); }
+  function saveMonthly() {
+    if (!mLabel.trim() || mTarget <= 0) return;
+    if (editingMonthly) {
+      const mid = editingMonthly.id;
+      setDoc(c => ({ ...c, monthlyTargets: c.monthlyTargets.map(m => m.id === mid ? { ...m, label: mLabel.trim(), target: mTarget, unit: mUnit } : m) }));
+    } else {
+      const now = new Date(), month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      setDoc(c => ({ ...c, monthlyTargets: [...c.monthlyTargets, { id: `m-${crypto.randomUUID()}`, month, label: mLabel.trim(), target: mTarget, unit: mUnit, done: 0 }] }));
+    }
+    setMDialogOpen(false);
+  }
+  function deleteMonthly(id: string) {
+    if (mDeleteConfirm !== id) { setMDeleteConfirm(id); return; }
+    setDoc(c => ({ ...c, monthlyTargets: c.monthlyTargets.filter(m => m.id !== id) }));
+    setMDeleteConfirm(null);
+  }
+  function updateMonthlyDone(id: string, done: number) { setDoc(c => ({ ...c, monthlyTargets: c.monthlyTargets.map(m => m.id === id ? { ...m, done: Math.max(0, done) } : m) })); }
   return <section className="page-section">
     <div className="page-title"><div><div className="eyebrow">Direction</div><h1>Goals</h1><p>Add, edit, or remove goals. Priorities decide what survives when the week cannot hold everything.</p></div><Button onClick={openAdd}><Plus /> New goal</Button></div>
     {doc.goals.length === 0 && <div className="empty-goals"><Target size={32} /><b>No goals yet</b><p>Add your first goal to start planning.</p></div>}
@@ -254,7 +279,18 @@ function GoalsView({ doc, setDoc }: { doc: PlannerDocument; setDoc: Dispatch<Set
       {tpl && <div className="goal-target-info">{tpl.target} {tpl.unit}/week</div>}
       <div className="goal-bottom"><div className="priority-select"><span>Priority</span>{([1, 2, 3] as const).map(priority => <button key={priority} className={goal.priority === priority ? 'selected' : ''} onClick={() => setDoc(current => ({ ...current, goals: current.goals.map(item => item.id === goal.id ? { ...item, priority } : item) }))}>P{priority}</button>)}</div><label><input type="checkbox" checked={goal.active} onChange={event => setDoc(current => ({ ...current, goals: current.goals.map(item => item.id === goal.id ? { ...item, active: event.target.checked } : item) }))} />Active</label></div>
     </article>; })}</div>
-    <div className="monthly"><div className="section-label">This month</div>{doc.monthlyTargets.map(target => <div key={target.id}><div><b>{target.label}</b><span>{target.done} / {target.target} {target.unit}</span></div><Progress value={target.done / target.target * 100} /></div>)}</div>
+    <div className="monthly"><div className="monthly-head"><div className="section-label">This month</div><button className="monthly-add-btn" onClick={openAddMonthly}><Plus size={14} /> Add monthly goal</button></div>
+      {doc.monthlyTargets.length === 0 && <div className="empty-goals" style={{ padding: '28px 16px' }}><Target size={24} /><b>Add your first monthly goal</b></div>}
+      {doc.monthlyTargets.map(mt => <div className="monthly-item" key={mt.id}>
+        <div className="monthly-item-top"><b>{mt.label}</b><div className="goal-actions"><button onClick={() => openEditMonthly(mt)} title="Edit"><Settings2 size={14} /></button>{mDeleteConfirm === mt.id ? <button onClick={() => deleteMonthly(mt.id)} title="Confirm delete" style={{ color: '#c05b46' }}><Trash2 size={14} /></button> : <button onClick={() => setMDeleteConfirm(mt.id)} title="Delete"><X size={14} /></button>}</div></div>
+        <div className="monthly-progress"><button className="monthly-step" onClick={() => updateMonthlyDone(mt.id, mt.done - 1)} disabled={mt.done <= 0}>-</button><input type="number" className="monthly-done-input" value={mt.done} onChange={e => updateMonthlyDone(mt.id, Number(e.target.value))} min={0} max={mt.target * 10} /><span>/ {mt.target} {mt.unit}</span><button className="monthly-step" onClick={() => updateMonthlyDone(mt.id, mt.done + 1)}>+</button></div>
+        <Progress value={Math.min(100, mt.target > 0 ? mt.done / mt.target * 100 : 0)} />
+      </div>)}
+    </div>
+    <Dialog open={mDialogOpen} onOpenChange={setMDialogOpen}><DialogContent className="checkin-dialog"><DialogHeader className="checkin-header"><DialogTitle className="checkin-title">{editingMonthly ? 'Edit monthly goal' : 'New monthly goal'}</DialogTitle><DialogDescription className="checkin-date">{editingMonthly ? 'Update your monthly target' : 'What do you want to achieve this month?'}</DialogDescription></DialogHeader><div className="checkin-fields">
+      <label className="checkin-field"><span className="checkin-label">Goal name</span><Input value={mLabel} onChange={e => setMLabel(e.target.value)} placeholder="e.g. Submit 15 applications" className="checkin-input" /></label>
+      <div className="goal-target-row"><label className="checkin-field" style={{ flex: 1 }}><span className="checkin-label">Target</span><Input type="number" value={mTarget || ''} onChange={e => setMTarget(Number(e.target.value))} className="checkin-input" placeholder="0" /></label><label className="checkin-field" style={{ flex: 1 }}><span className="checkin-label">Unit</span><Input value={mUnit} onChange={e => setMUnit(e.target.value)} className="checkin-input" placeholder="count" /></label></div>
+    </div><DialogFooter className="checkin-footer"><Button className="checkin-submit" onClick={saveMonthly} disabled={!mLabel.trim() || mTarget <= 0}>{editingMonthly ? 'Save changes' : 'Add goal'}</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent className="checkin-dialog"><DialogHeader className="checkin-header"><DialogTitle className="checkin-title">{editingGoal ? 'Edit goal' : 'New goal'}</DialogTitle><DialogDescription className="checkin-date">{editingGoal ? 'Update your goal details' : 'Define what you want to achieve'}</DialogDescription></DialogHeader><div className="checkin-fields">
       <label className="checkin-field"><span className="checkin-label">Goal name</span><Input value={gTitle} onChange={e => setGTitle(e.target.value)} placeholder="e.g. Learn Dutch B1" className="checkin-input" /></label>
       <label className="checkin-field"><span className="checkin-label">Category</span><select className="goal-select" value={gCategory} onChange={e => setGCategory(e.target.value)}>{categories.map(c => <option key={c} value={c}>{cat(c).label}</option>)}</select></label>

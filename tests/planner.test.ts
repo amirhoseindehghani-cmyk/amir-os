@@ -401,3 +401,34 @@ test('profile summary appears in AI planning context', () => {
   assert.ok(context.profileSummary.includes('gymDaysPerWeek: 4'));
   assert.ok(context.profileSummary.includes('workSchedule: Flexible remote'));
 });
+
+test('default document has monthly targets with optional goalId', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  assert.ok(doc.monthlyTargets.length >= 1, 'should have at least one monthly target');
+  for (const mt of doc.monthlyTargets) {
+    assert.ok(mt.id, 'monthly target should have an id');
+    assert.ok(mt.label, 'monthly target should have a label');
+    assert.ok(typeof mt.target === 'number', 'monthly target should have a numeric target');
+    assert.ok(typeof mt.done === 'number', 'monthly target should have a numeric done');
+    assert.ok(typeof mt.unit === 'string', 'monthly target should have a unit');
+  }
+});
+
+test('monthly target goalId is optional', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  doc.monthlyTargets.push({ id: 'm-test', month: '2026-09', label: 'Read 4 books', target: 4, unit: 'books', done: 1 });
+  assert.equal(doc.monthlyTargets.at(-1)!.goalId, undefined);
+  assert.equal(doc.monthlyTargets.at(-1)!.label, 'Read 4 books');
+  assert.equal(doc.monthlyTargets.at(-1)!.done, 1);
+});
+
+test('monthly target done can be updated without affecting other fields', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const mt = doc.monthlyTargets[0];
+  const originalLabel = mt.label;
+  const originalTarget = mt.target;
+  mt.done = 5;
+  assert.equal(mt.done, 5);
+  assert.equal(mt.label, originalLabel);
+  assert.equal(mt.target, originalTarget);
+});
