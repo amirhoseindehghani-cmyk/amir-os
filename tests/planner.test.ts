@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDefaultDocument, migratePlannerData } from '../lib/default-data';
 import { addLocalDays, localDateInTimeZone, startOfIsoWeek } from '../lib/date-utils';
-import { deterministicPlan } from '../lib/planner-engine';
+import { buildPlannerContext, deterministicPlan } from '../lib/planner-engine';
 import { applyProposalAtomically, PROPOSAL_ACTIONS, proposalJsonSchema, validateProposalAgainstDocument, validateProposalShape } from '../lib/proposal-ops';
 import { getWeek, targetMetrics } from '../lib/week-metrics';
 import type { PlanProposal, PlannerDocument, ReplanRequest } from '../lib/planner-types';
@@ -279,4 +279,51 @@ test('scheduling a session from an ongoing task creates correct sourceTaskId lin
     { id: 'c1', action: 'add', label: 'Work on SabzApply', session: { ...session, id: 'session-new' } },
   ]);
   assert.deepEqual(validateProposalAgainstDocument(proposal, withTask), []);
+});
+
+test('migration adds empty reviews array when field is missing', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  delete (doc as any).reviews;
+  const migrated = migratePlannerData(doc, '2026-09-07');
+  assert.ok(Array.isArray(migrated.reviews));
+  assert.equal(migrated.reviews.length, 0);
+});
+
+test('migration backfills review struggle and carryForward fields', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  doc.reviews = [{ id: 'r1', date: '2026-09-06', score: 7, win: 'Good run', blocker: 'Procrastinated' } as any];
+  const migrated = migratePlannerData(doc, '2026-09-07');
+  const review = migrated.reviews[0];
+  assert.equal(review.struggle, 'Procrastinated');
+  assert.equal(review.carryForward, '');
+  assert.equal(review.reviewedAt, '');
+});
+
+test('adding a review stores it keyed by date', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const review = { id: 'review-test', date: '2026-09-07', score: 8, win: 'Great focus', blocker: 'None', struggle: 'None', carryForward: 'Finish contracts', reviewedAt: '2026-09-07T22:00:00.000Z' };
+  const updated = { ...doc, reviews: [...doc.reviews, review] };
+  const found = updated.reviews.find(r => r.date === '2026-09-07');
+  assert.ok(found);
+  assert.equal(found.score, 8);
+  assert.equal(found.carryForward, 'Finish contracts');
+});
+
+test('reviews appear in AI planning context', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  doc.reviews = [
+    { id: 'r1', date: '2026-09-06', score: 8, win: 'Great focus', blocker: '', struggle: 'Late start', carryForward: 'Finish contracts', reviewedAt: '2026-09-06T22:00:00.000Z' },
+    { id: 'r2', date: '2026-09-05', score: 6, win: 'Completed run', blocker: '', struggle: 'Skipped Dutch', carryForward: '', reviewedAt: '2026-09-05T22:00:00.000Z' },
+  ];
+  const context = buildPlannerContext({
+    trigger: 'conversation', message: 'Rebalance', document: doc,
+    now: '2026-09-07T10:00:00.000Z', currentLocalDate: '2026-09-07',
+    selectedDate: '2026-09-07', currentWeekId: startOfIsoWeek('2026-09-07'), timezone: 'Europe/Amsterdam',
+  });
+  assert.equal(context.recentReviews.length, 2);
+  assert.equal(context.recentReviews[0].date, '2026-09-06');
+  assert.equal(context.recentReviews[0].struggle, 'Late start');
+  assert.equal(context.recentReviews[0].carryForward, 'Finish contracts');
+  assert.equal(context.recentReviews[1].date, '2026-09-05');
+  assert.equal(context.recentReviews[1].struggle, 'Skipped Dutch');
 });
