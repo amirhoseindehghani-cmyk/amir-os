@@ -4,7 +4,7 @@ import { createDefaultDocument, migratePlannerData } from '../lib/default-data';
 import { addLocalDays, localDateInTimeZone, startOfIsoWeek } from '../lib/date-utils';
 import { buildPlannerContext, deterministicPlan } from '../lib/planner-engine';
 import { applyProposalAtomically, PROPOSAL_ACTIONS, proposalJsonSchema, validateProposalAgainstDocument, validateProposalShape } from '../lib/proposal-ops';
-import { getWeek, targetMetrics } from '../lib/week-metrics';
+import { getWeek, historicalPatterns, targetMetrics } from '../lib/week-metrics';
 import type { PlanProposal, PlannerDocument, ReplanRequest } from '../lib/planner-types';
 
 function request(document: PlannerDocument, selectedDate: string, message: string): ReplanRequest {
@@ -570,4 +570,43 @@ END:VCALENDAR`;
   assert.equal(events[0].date, '2026-09-07');
   assert.equal(events[0].startTime, '14:00');
   assert.equal(events[0].endTime, '15:00');
+});
+
+test('historicalPatterns returns completion rates and skip patterns from past weeks', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const weekId = startOfIsoWeek('2026-09-07');
+  const prevWeekId = addLocalDays(weekId, -7);
+  doc.weeks.push({ weekId: prevWeekId, startDate: prevWeekId, endDate: addLocalDays(prevWeekId, 6), targets: doc.weeklyTargetTemplates.map(t => ({ ...t, baselineDone: 0 })), createdAt: new Date().toISOString(), source: 'rollover' });
+  doc.sessions.push(
+    { id: 'prev-run', date: addLocalDays(prevWeekId, 1), start: '16:00', duration: 55, title: 'Easy run', category: 'fitness', kind: 'flexible', status: 'done', goalId: 'g-marathon', contribution: 1, contributionUnit: 'sessions', runType: 'easy', distanceKm: 7 },
+    { id: 'prev-skip', date: addLocalDays(prevWeekId, 2), start: '10:00', duration: 90, title: 'Internship', category: 'internship', kind: 'flexible', status: 'skipped', goalId: 'g-internship' },
+  );
+  doc.reviews.push({ id: 'r-prev', date: addLocalDays(prevWeekId, 6), score: 7, win: 'Good run', blocker: '', struggle: 'Late start', carryForward: 'Finish report' });
+  const patterns = historicalPatterns(doc, weekId);
+  assert.ok(patterns.weeksAnalyzed >= 1);
+  assert.ok(patterns.targetCompletion.length > 0);
+  const marathon = patterns.targetCompletion.find(t => t.goalId === 'g-marathon');
+  assert.ok(marathon);
+  assert.ok(marathon.avgCompletionRate > 0);
+  assert.ok(patterns.skipPatterns.length === 7);
+  assert.ok(patterns.reviewInsights.avgScore > 0);
+});
+
+test('historicalPatterns included in AI planning context', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const ctx = buildPlannerContext(request(doc, '2026-09-07', 'Plan'));
+  assert.ok(ctx.historicalPatterns);
+  assert.ok(typeof ctx.historicalPatterns.weeksAnalyzed === 'number');
+  assert.ok(Array.isArray(ctx.historicalPatterns.targetCompletion));
+  assert.ok(Array.isArray(ctx.historicalPatterns.skipPatterns));
+  assert.ok(ctx.historicalPatterns.reviewInsights);
+});
+
+test('recentReviews in context expanded to 14 entries', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  for (let i = 0; i < 15; i++) {
+    doc.reviews.push({ id: `r-${i}`, date: addLocalDays('2026-09-07', -i), score: 7, win: `Win ${i}`, blocker: '', struggle: `Struggle ${i}`, carryForward: '' });
+  }
+  const ctx = buildPlannerContext(request(doc, '2026-09-07', 'Plan'));
+  assert.equal(ctx.recentReviews.length, 14);
 });
