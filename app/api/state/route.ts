@@ -69,9 +69,26 @@ export async function PUT(request: Request) {
 
   const document = migratePlannerData(input, localDate);
   const now = new Date().toISOString();
-  const docString = JSON.stringify(document);
 
   try {
+    const [current] = await db.select().from(plannerState).where(eq(plannerState.userId, USER_ID)).limit(1);
+
+    if (current?.document) {
+      const stored = JSON.parse(current.document);
+
+      if (stored.version != null && stored.version !== document.version) {
+        await db.insert(plannerSnapshots).values({ id: `${USER_ID}-pre-v${document.version}-${localDate}`, userId: USER_ID, date: localDate, document: current.document, createdAt: now }).onConflictDoNothing();
+      }
+
+      const storedTasks: Array<{ id: string }> = Array.isArray(stored.ongoingTasks) ? stored.ongoingTasks : [];
+      if (document.ongoingTasks.length < storedTasks.length) {
+        const ids = new Set(document.ongoingTasks.map(t => t.id));
+        for (const t of storedTasks) { if (t.id && !ids.has(t.id)) document.ongoingTasks.push(t as (typeof document.ongoingTasks)[number]); }
+      }
+    }
+
+    const docString = JSON.stringify(document);
+
     await db
       .insert(plannerState)
       .values({
