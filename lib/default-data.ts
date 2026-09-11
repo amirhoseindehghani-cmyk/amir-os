@@ -55,16 +55,21 @@ function migrateV5toV6(doc:any,localDate:string):PlannerDocument{
   return migrateV6toV7(result,localDate);
 }
 
+function autoLockToday(doc:PlannerDocument,today:string):PlannerDocument{
+  let changed=false;const sessions=doc.sessions.map(s=>{if(s.date===today&&!s.locked){changed=true;return{...s,locked:true,lockedReason:'auto-lock' as const};}return s;});
+  return changed?{...doc,sessions}:doc;
+}
+
 function migrateV6toV7(doc:any,localDate:string):PlannerDocument{
   const sessions=(doc.sessions??[]).map((s:any)=>({...s,source:s.source??'ai',locked:s.locked??false}));
   const result={...doc,version:7,sessions,skippedSlots:doc.skippedSlots??[]} as PlannerDocument;
-  return ensureCurrentWeek(repairMondayMigration(result,localDate),localDate);
+  return autoLockToday(ensureCurrentWeek(repairMondayMigration(result,localDate),localDate),localDate);
 }
 
 export function migratePlannerData(input:unknown,localDate:string):PlannerDocument{
   const fallback=createDefaultDocument(localDate); if(!input||typeof input!=='object')return fallback;
   const raw=input as Record<string,unknown>;
-  if(raw.version===7&&raw.profile&&Array.isArray(raw.weeks)){const doc=raw as PlannerDocument;if(!Array.isArray(doc.ongoingTasks))doc.ongoingTasks=[];if(!Array.isArray(doc.skippedSlots))doc.skippedSlots=[];if(!Array.isArray(doc.calendarEvents))doc.calendarEvents=[];if(!Array.isArray(doc.reviews))doc.reviews=[];for(const r of doc.reviews){if(!r.struggle)r.struggle=r.blocker||'';if(!r.carryForward)r.carryForward='';if(!r.reviewedAt)r.reviewedAt='';}if(!Array.isArray(doc.profile.customCategories)){const cats=new Set<string>();for(const g of doc.goals)cats.add(g.category);for(const s of doc.sessions)if(s.category)cats.add(s.category);doc.profile.customCategories=cats.size?[...cats]:['personal','work','fitness','learning'];}return ensureCurrentWeek(repairMondayMigration(doc,localDate),localDate);}
+  if(raw.version===7&&raw.profile&&Array.isArray(raw.weeks)){const doc=raw as PlannerDocument;if(!Array.isArray(doc.ongoingTasks))doc.ongoingTasks=[];if(!Array.isArray(doc.skippedSlots))doc.skippedSlots=[];if(!Array.isArray(doc.calendarEvents))doc.calendarEvents=[];if(!Array.isArray(doc.reviews))doc.reviews=[];for(const r of doc.reviews){if(!r.struggle)r.struggle=r.blocker||'';if(!r.carryForward)r.carryForward='';if(!r.reviewedAt)r.reviewedAt='';}if(!Array.isArray(doc.profile.customCategories)){const cats=new Set<string>();for(const g of doc.goals)cats.add(g.category);for(const s of doc.sessions)if(s.category)cats.add(s.category);doc.profile.customCategories=cats.size?[...cats]:['personal','work','fitness','learning'];}return autoLockToday(ensureCurrentWeek(repairMondayMigration(doc,localDate),localDate),localDate);}
   if(raw.version===6&&raw.profile&&Array.isArray(raw.weeks)){const doc=raw as any;if(!Array.isArray(doc.ongoingTasks))doc.ongoingTasks=[];if(!Array.isArray(doc.calendarEvents))doc.calendarEvents=[];if(!Array.isArray(doc.reviews))doc.reviews=[];for(const r of doc.reviews){if(!r.struggle)r.struggle=r.blocker||'';if(!r.carryForward)r.carryForward='';if(!r.reviewedAt)r.reviewedAt='';}if(!Array.isArray(doc.profile.customCategories)){const cats=new Set<string>();for(const g of doc.goals)cats.add(g.category);for(const s of doc.sessions)if(s.category)cats.add(s.category);doc.profile.customCategories=cats.size?[...cats]:['personal','work','fitness','learning'];}return migrateV6toV7(doc,localDate);}
   if(raw.version===5&&raw.profile&&Array.isArray(raw.weeks)){const doc=raw as any;if(!Array.isArray(doc.ongoingTasks))doc.ongoingTasks=[];if(!Array.isArray(doc.calendarEvents))doc.calendarEvents=[];if(!Array.isArray(doc.reviews))doc.reviews=[];for(const r of doc.reviews){if(!r.struggle)r.struggle=r.blocker||'';if(!r.carryForward)r.carryForward='';if(!r.reviewedAt)r.reviewedAt='';}if(!Array.isArray(doc.profile.customCategories)){const cats=new Set<string>();for(const g of doc.goals)cats.add(g.category);for(const s of doc.sessions)if(s.category)cats.add(s.category);doc.profile.customCategories=cats.size?[...cats]:['personal','work','fitness','learning'];}return migrateV5toV6(doc,localDate);}
   if(raw.version===4&&raw.profile&&Array.isArray(raw.goals)){
@@ -76,7 +81,7 @@ export function migratePlannerData(input:unknown,localDate:string):PlannerDocume
   }
   const oldDays=(raw.dayData??{}) as Record<string,{blocks?:Array<Record<string,unknown>>;review?:Record<string,unknown>;top3?:string[]}>,sessions:Session[]=[],reviews:PlannerDocument['reviews']=[];
   for(const[date,day]of Object.entries(oldDays)){for(const block of day.blocks??[])sessions.push({id:String(block.id??`${date}-${sessions.length}`),date,start:String(block.time??'12:00'),duration:Number(block.dur??60),title:String(block.label??'Untitled'),category:(block.cat as Session['category'])??'personal',kind:block.type==='commitment'?'fixed':block.type==='recovery'?'recovery':block.type==='routine'?'routine':'flexible',status:block.done?'done':'planned',sourceTaskId:block.sourceTaskId?String(block.sourceTaskId):undefined});if(day.review)reviews.push({id:`review-${date}`,date,score:Number(day.review.score??5),win:String(day.review.win??''),blocker:String(day.review.blocker??'')})}
-  return ensureCurrentWeek({...fallback,sessions:sessions.length?sessions:fallback.sessions,reviews:reviews.length?reviews:fallback.reviews},localDate);
+  return autoLockToday(ensureCurrentWeek({...fallback,sessions:sessions.length?sessions:fallback.sessions,reviews:reviews.length?reviews:fallback.reviews},localDate),localDate);
 }
 
 function repairMondayMigration(doc:PlannerDocument,localDate:string):PlannerDocument{

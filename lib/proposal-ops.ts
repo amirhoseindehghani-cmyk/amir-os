@@ -9,6 +9,7 @@ export function validateProposalShape(value:unknown):value is PlanProposal{
   return typeof p.id==='string'&&typeof p.title==='string'&&typeof p.summary==='string'&&DATE_RE.test(p.selectedDate)&&DATE_RE.test(p.weekId)&&Array.isArray(p.reasoning)&&p.reasoning.every(x=>typeof x==='string')&&Array.isArray(p.tradeoffs)&&p.tradeoffs.every(x=>typeof x==='string')&&Array.isArray(p.changes)&&p.changes.length<=20&&p.changes.every(c=>c&&typeof c.id==='string'&&typeof c.label==='string'&&(PROPOSAL_ACTIONS as readonly string[]).includes(c.action));
 }
 
+const mins=(t:string)=>Number(t.slice(0,2))*60+Number(t.slice(3));
 const show=(value:unknown)=>value===undefined?'nothing':JSON.stringify(value);
 const inRange=(value:unknown,min:number,max:number)=>typeof value==='number'&&Number.isFinite(value)&&value>=min&&value<=max;
 
@@ -71,9 +72,10 @@ export function validateProposalAgainstDocument(proposal:PlanProposal,doc:Planne
 
 export function applyProposalAtomically(doc:PlannerDocument,proposal:PlanProposal):{ok:true;document:PlannerDocument}|{ok:false;errors:string[]}{
   const errors=validateProposalAgainstDocument(proposal,doc);if(errors.length)return{ok:false,errors};
+  const changes=proposal.changes.filter(c=>{if(c.sessionId){const s=doc.sessions.find(x=>x.id===c.sessionId);if(s?.locked)return false;}if((c.action==='add'||c.action==='add-commitment')&&c.session){const ss=c.session;if(doc.skippedSlots.some(sl=>sl.date===ss.date&&mins(ss.start)<mins(sl.endTime)&&mins(ss.start)+ss.duration>mins(sl.startTime)))return false;}return true;});
   let sessions=doc.sessions.map(s=>({...s})),goals=doc.goals.map(g=>({...g})),weeks=doc.weeks.map(w=>({...w,targets:w.targets.map(t=>({...t}))}));const flaggedTargets:string[]=[];
-  for(const c of proposal.changes){
-    if((c.action==='add'||c.action==='add-commitment')&&c.session)sessions.push({...c.session});
+  for(const c of changes){
+    if((c.action==='add'||c.action==='add-commitment')&&c.session)sessions.push({...c.session,source:'ai',locked:false});
     else if(c.action==='remove')sessions=sessions.map(s=>s.id===c.sessionId?{...s,status:'skipped'}:s);
     else if(c.action==='move')sessions=sessions.map(s=>s.id===c.sessionId?{...s,date:c.patch!.date!,start:c.patch!.start!}:s);
     else if(c.action==='shorten')sessions=sessions.map(s=>{

@@ -268,7 +268,12 @@ test('v6-to-v7 migration adds source and locked to sessions', () => {
   assert.ok(Array.isArray(migrated.skippedSlots));
   for (const s of migrated.sessions) {
     assert.equal(s.source, 'ai');
-    assert.equal(s.locked, false);
+    if (s.date === '2026-09-07') {
+      assert.equal(s.locked, true, 'today sessions auto-locked');
+      assert.equal(s.lockedReason, 'auto-lock');
+    } else {
+      assert.equal(s.locked, false, 'non-today sessions stay unlocked');
+    }
   }
 });
 
@@ -641,6 +646,84 @@ test('flag-at-risk is rejected when targetId does not exist', () => {
   ]);
   const errors = validateProposalAgainstDocument(proposal, doc);
   assert.ok(errors.some(e => e.includes('w99')));
+});
+
+test('applyProposalAtomically silently skips changes targeting locked sessions', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const lockedSession = doc.sessions.find(s => s.id === 'internship-1')!;
+  lockedSession.locked = true;
+  lockedSession.source = 'user';
+  lockedSession.lockedReason = 'user-edited';
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'remove' as const, sessionId: 'internship-1', label: 'Remove internship' },
+    { id: 'c2', action: 'remove' as const, sessionId: 'lunch', label: 'Remove lunch' },
+  ]);
+  const result = applyProposalAtomically(doc, proposal);
+  assert.ok(result.ok);
+  if (!result.ok) return;
+  const internship = result.document.sessions.find(s => s.id === 'internship-1')!;
+  assert.equal(internship.status, 'planned', 'locked session should NOT be removed');
+  const lunch = result.document.sessions.find(s => s.id === 'lunch')!;
+  assert.equal(lunch.status, 'skipped', 'unlocked session should be removed');
+});
+
+test('applyProposalAtomically skips moves targeting locked sessions', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const session = doc.sessions.find(s => s.id === 'sabz-1')!;
+  session.locked = true;
+  session.source = 'user';
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'move' as const, sessionId: 'sabz-1', label: 'Move sabz', patch: { date: '2026-09-08', start: '10:00' } },
+  ]);
+  const result = applyProposalAtomically(doc, proposal);
+  assert.ok(result.ok);
+  if (!result.ok) return;
+  const sabz = result.document.sessions.find(s => s.id === 'sabz-1')!;
+  assert.equal(sabz.start, '13:30', 'locked session should keep original time');
+});
+
+test('AI-added sessions get source ai and locked false', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  const newSession = { id: 'new-1', date: '2026-09-07', start: '20:00', duration: 60, title: 'Study', category: 'learning' as const, kind: 'flexible' as const, status: 'planned' as const, goalId: 'g-learning' };
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'add' as const, label: 'Add study', session: newSession },
+  ]);
+  const result = applyProposalAtomically(doc, proposal);
+  assert.ok(result.ok);
+  if (!result.ok) return;
+  const added = result.document.sessions.find(s => s.id === 'new-1')!;
+  assert.equal(added.source, 'ai');
+  assert.equal(added.locked, false);
+});
+
+test('applyProposalAtomically skips add into skipped slot', () => {
+  const doc = createDefaultDocument('2026-09-07');
+  doc.skippedSlots = [{ date: '2026-09-07', startTime: '14:00', endTime: '15:30', skippedAt: new Date().toISOString() }];
+  const newSession = { id: 'new-2', date: '2026-09-07', start: '14:30', duration: 45, title: 'Blocked slot', category: 'learning' as const, kind: 'flexible' as const, status: 'planned' as const };
+  const proposal = proposalWith('2026-09-07', [
+    { id: 'c1', action: 'add' as const, label: 'Into skipped', session: newSession },
+  ]);
+  const result = applyProposalAtomically(doc, proposal);
+  assert.ok(result.ok);
+  if (!result.ok) return;
+  assert.ok(!result.document.sessions.some(s => s.id === 'new-2'), 'session in skipped slot should not be added');
+});
+
+test('auto-lock locks today sessions on migration load', () => {
+  const today = '2026-09-07';
+  const v7doc = createDefaultDocument(today);
+  v7doc.sessions.forEach(s => { s.locked = false; });
+  const migrated = migratePlannerData(v7doc, today);
+  const todaySessions = migrated.sessions.filter(s => s.date === today);
+  assert.ok(todaySessions.length > 0);
+  for (const s of todaySessions) {
+    assert.equal(s.locked, true, `${s.title} should be auto-locked`);
+    assert.equal(s.lockedReason, 'auto-lock');
+  }
+  const otherSessions = migrated.sessions.filter(s => s.date !== today);
+  for (const s of otherSessions) {
+    assert.equal(s.locked, false, `${s.title} on ${s.date} should not be auto-locked`);
+  }
 });
 
 test('new actions set-week-plan and rebalance-week pass validation', () => {
