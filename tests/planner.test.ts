@@ -245,7 +245,7 @@ test('v5-to-v6 migration normalizes km units to sessions', () => {
   } as any;
   v5.weeks = [{ ...v5.weeks[0], targets: v5.weeklyTargetTemplates.map((t: any) => ({ ...t })) }];
   const migrated = migratePlannerData(v5, '2026-09-07');
-  assert.equal(migrated.version, 6);
+  assert.equal(migrated.version, 7);
   const running = migrated.weeklyTargetTemplates.find(t => t.goalId === 'g-marathon');
   assert.ok(running);
   assert.equal(running.unit, 'sessions');
@@ -257,6 +257,19 @@ test('v5-to-v6 migration normalizes km units to sessions', () => {
   assert.equal(runSession.distanceKm, 7);
   assert.equal(migrated.monthlyTargets[0].unit, 'sessions');
   assert.equal(migrated.monthlyTargets[0].target, 14);
+});
+
+test('v6-to-v7 migration adds source and locked to sessions', () => {
+  const v6 = { ...createDefaultDocument('2026-09-07'), version: 6 } as any;
+  delete v6.skippedSlots;
+  for (const s of v6.sessions) { delete s.source; delete s.locked; }
+  const migrated = migratePlannerData(v6, '2026-09-07');
+  assert.equal(migrated.version, 7);
+  assert.ok(Array.isArray(migrated.skippedSlots));
+  for (const s of migrated.sessions) {
+    assert.equal(s.source, 'ai');
+    assert.equal(s.locked, false);
+  }
 });
 
 test('migration adds empty ongoingTasks array when field is missing', () => {

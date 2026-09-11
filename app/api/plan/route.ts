@@ -45,7 +45,7 @@ async function requireUser() {
 function validateRequest(value: unknown): value is ReplanRequest {
   if (!value || typeof value !== "object") return false;
   const request = value as Partial<ReplanRequest>;
-  if (request.document?.version !== 6) return false;
+  if (request.document?.version !== 7) return false;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(request.currentLocalDate ?? "")) return false;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(request.selectedDate ?? "")) return false;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(request.currentWeekId ?? "")) return false;
